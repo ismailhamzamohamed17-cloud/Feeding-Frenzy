@@ -6,6 +6,7 @@ st.set_page_config(page_title="Virtua Arcade: Feeding Frenzy", layout="centered"
 st.title("🐟 Virtua Arcade: Feeding Frenzy")
 st.caption("Move your cursor or drag your finger on mobile to feed and grow! Avoid bigger fish.")
 
+# Open the Python triple-quoted string
 game_html = """
 <!DOCTYPE html>
 <html>
@@ -20,7 +21,6 @@ game_html = """
         .arcade-btn { margin-top: 15px; padding: 10px 24px; background: #00f0ff; color: #010a15; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; box-shadow: 0 0 10px #00f0ff; font-family: monospace; }
     </style>
 </head>
-"""
 <body>
     <div id="gameContainer">
         <div id="hud">
@@ -30,7 +30,7 @@ game_html = """
         <div id="screenOverlay">
             <h2 id="overlayTitle" style="color: #00f0ff; letter-spacing: 2px;">FEEDING FRENZY</h2>
             <p id="overlaySub" style="color: #64748b; font-size: 12px; max-width: 280px;">Eat smaller fish to grow. Avoid larger ocean predators!</p>
-            <button class="arcade-btn" id="actionBtn" onclick="initiateArcadeGame()">START VENTURE </button>
+            <button class="arcade-btn" id="actionBtn" onclick="initiateArcadeGame()">START VENTURE 🎮</button>
         </div>
         <canvas id="aquariumCanvas" width="380" height="480"></canvas>
     </div>
@@ -62,9 +62,10 @@ game_html = """
         player.targetY = Math.max(10, Math.min(clientY - rect.top, rect.height - 10));
     }
     container.addEventListener("mousemove", (e) => updateInputCoordinates(e.clientX, e.clientY));
-    container.addEventListener("touchstart", (e) => { setupAudio(); if(e.touches.length > 0) updateInputCoordinates(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
-    container.addEventListener("touchmove", (e) => { e.preventDefault(); if(e.touches.length > 0) updateInputCoordinates(e.touches[0].clientX, e.touches[0].clientY); }, { passive: false });
+    container.addEventListener("touchstart", (e) => { setupAudio(); if(e.touches.length > 0) updateInputCoordinates(e.touches.clientX, e.touches.clientY); }, { passive: true });
+    container.addEventListener("touchmove", (e) => { e.preventDefault(); if(e.touches.length > 0) updateInputCoordinates(e.touches.clientX, e.touches.clientY); }, { passive: false });
 
+    // Instantly activates loops without crashing the DOM context parameters
     function initiateArcadeGame() {
         setupAudio(); score = 0; gameActive = true; player.radius = 15; player.x = 190; player.y = 240; player.targetX = 190; player.targetY = 240;
         marineThreats = []; environmentBubbles = []; screenOverlay.style.display = "none"; scoreLabel.innerText = "SCORE: 00000"; sizeLabel.innerText = "SIZE: 15";
@@ -109,4 +110,5 @@ game_html = """
 </body>
 </html>
 """
+
 components.html(game_html, height=520, scrolling=False)
