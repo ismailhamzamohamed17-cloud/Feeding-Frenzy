@@ -6,8 +6,8 @@ st.set_page_config(page_title="Virtua Arcade: Feeding Frenzy 3D", layout="center
 st.title("🐋 Virtua Arcade: Feeding Frenzy 3D Evolution")
 st.caption("Drag your finger or cursor to navigate the depths. Consume green-tinted prey, avoid red alpha predators!")
 
-# Open the Python triple-quoted string with styling layers
-game_html = """
+# Using a raw string block (r""") stops Python from misinterpreting text inside the style rules
+game_html = r"""
 <!DOCTYPE html>
 <html>
 <head>
@@ -138,4 +138,5 @@ game_html = """
 </html>
 """
 
+# Appends and displays the component frames smoothly
 components.html(game_html, height=520, scrolling=False)
