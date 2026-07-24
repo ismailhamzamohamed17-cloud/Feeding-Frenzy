@@ -2,35 +2,37 @@ import streamlit as st
 import streamlit.components.v1 as components
 import random
 
-st.set_page_config(page_title="Virtua Arcade: Feeding Frenzy", layout="centered")
-st.title("🐟 Virtua Arcade: Feeding Frenzy")
-st.caption("Move your cursor or drag your finger on mobile to feed and grow! Avoid bigger fish.")
+st.set_page_config(page_title="Virtua Arcade: Feeding Frenzy 3D", layout="centered")
+st.title("🐋 Virtua Arcade: Feeding Frenzy 3D Evolution")
+st.caption("Drag your finger or cursor to navigate the depths. Consume green-tinted prey, avoid red alpha predators!")
 
-# Open the Python triple-quoted string
+# Open the Python triple-quoted string with styling layers
 game_html = """
 <!DOCTYPE html>
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
-        body { margin: 0; padding: 0; background: #010a15; font-family: monospace; user-select: none; -webkit-user-select: none; overflow: hidden; }
-        #gameContainer { position: relative; width: 380px; height: 480px; margin: auto; border: 4px solid #00f0ff; border-radius: 16px; overflow: hidden; box-shadow: 0 0 30px rgba(0, 240, 255, 0.3); touch-action: none; }
-        canvas { display: block; background: linear-gradient(to bottom, #02162e, #010714); }
-        #hud { position: absolute; top: 12px; left: 12px; right: 12px; display: flex; justify-content: space-between; color: #00f0ff; font-size: 16px; font-weight: bold; pointer-events: none; z-index: 10; text-shadow: 0 0 5px #00f0ff; }
-        #screenOverlay { position: absolute; inset: 0; background: rgba(1, 10, 21, 0.85); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 20; color: white; text-align: center; }
-        .arcade-btn { margin-top: 15px; padding: 10px 24px; background: #00f0ff; color: #010a15; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; box-shadow: 0 0 10px #00f0ff; font-family: monospace; }
+        body { margin: 0; padding: 0; background: #01040a; font-family: monospace; user-select: none; -webkit-user-select: none; overflow: hidden; }
+        #gameContainer { position: relative; width: 380px; height: 480px; margin: auto; border: 4px solid #10b981; border-radius: 16px; overflow: hidden; box-shadow: 0 0 35px rgba(16, 185, 129, 0.25); touch-action: none; }
+        canvas { display: block; background: #020b18; }
+        #hud { position: absolute; top: 14px; left: 14px; right: 14px; display: flex; justify-content: space-between; color: #34d399; font-size: 15px; font-weight: bold; pointer-events: none; z-index: 10; text-shadow: 0 0 8px #047857; letter-spacing: 1px; }
+        #screenOverlay { position: absolute; inset: 0; background: rgba(2, 8, 20, 0.9); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 20; color: white; text-align: center; }
+        .arcade-btn { margin-top: 20px; padding: 12px 28px; background: #10b981; color: #01040a; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4); font-family: monospace; font-size: 13px; letter-spacing: 1px; transition: transform 0.1s; }
+        .arcade-btn:active { transform: scale(0.95); }
     </style>
 </head>
+"""
 <body>
     <div id="gameContainer">
         <div id="hud">
             <div id="scoreLabel">SCORE: 00000</div>
-            <div id="sizeLabel">SIZE: 15</div>
+            <div id="sizeLabel">RANK: MINNOW (15)</div>
         </div>
         <div id="screenOverlay">
-            <h2 id="overlayTitle" style="color: #00f0ff; letter-spacing: 2px;">FEEDING FRENZY</h2>
-            <p id="overlaySub" style="color: #64748b; font-size: 12px; max-width: 280px;">Eat smaller fish to grow. Avoid larger ocean predators!</p>
-            <button class="arcade-btn" id="actionBtn" onclick="initiateArcadeGame()">START VENTURE 🎮</button>
+            <h2 id="overlayTitle" style="color: #10b981; letter-spacing: 3px; font-size: 24px; margin: 0;">FEEDING FRENZY 3D</h2>
+            <p id="overlaySub" style="color: #64748b; font-size: 11px; max-width: 290px; line-height: 1.6; margin-top: 10px;">Navigate deep abyssal cross-currents. Consume smaller bioluminescent lifeforms to trigger physical scaling growth.</p>
+            <button class="arcade-btn" id="actionBtn" onclick="initiateArcadeGame()">DESCENT INTO DEEP 🌊</button>
         </div>
         <canvas id="aquariumCanvas" width="380" height="480"></canvas>
     </div>
@@ -43,67 +45,91 @@ game_html = """
     const actionBtn = document.getElementById("actionBtn");
 
     let score = 0, gameActive = false;
-    // 🐟 SLOWED DOWN: Reduced player tracking speed from 0.12 to 0.05 for smoother response
-    let player = { x: 190, y: 240, radius: 15, targetX: 190, targetY: 240, speed: 0.05, facingLeft: false };
+    let player = { x: 190, y: 240, radius: 15, targetX: 190, targetY: 240, speed: 0.06, facingLeft: false, tailWag: 0 };
     let marineThreats = []; let environmentBubbles = [];
     let animationFrameId = null, spawnIntervalId = null, audioCtx = null;
 
     function setupAudio() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
     function sound(type) {
         setupAudio(); if (!audioCtx) return; let osc = audioCtx.createOscillator(), gain = audioCtx.createGain(); osc.connect(gain); gain.connect(audioCtx.destination);
-        if (type === "zap") { osc.type = "sawtooth"; osc.frequency.setValueAtTime(540, audioCtx.currentTime); osc.frequency.exponentialRampToValueAtTime(45, audioCtx.currentTime + 0.15); gain.gain.setValueAtTime(0.4, audioCtx.currentTime); osc.start(); osc.stop(audioCtx.currentTime + 0.15); }
-        else if (type === "ding") { osc.type = "sine"; osc.frequency.setValueAtTime(950, audioCtx.currentTime); osc.frequency.linearRampToValueAtTime(1350, audioCtx.currentTime + 0.08); gain.gain.setValueAtTime(0.2, audioCtx.currentTime); osc.start(); osc.stop(audioCtx.currentTime + 0.08); }
-        else if (type === "boom") { osc.type = "sawtooth"; osc.frequency.setValueAtTime(110, audioCtx.currentTime); osc.frequency.exponentialRampToValueAtTime(20, audioCtx.currentTime + 0.38); gain.gain.setValueAtTime(0.5, audioCtx.currentTime); osc.start(); osc.stop(audioCtx.currentTime + 0.38); }
-        else if (type === "level") { osc.type = "sine"; osc.frequency.setValueAtTime(523.25, audioCtx.currentTime); osc.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.1); osc.frequency.setValueAtTime(783.99, audioCtx.currentTime + 0.2); gain.gain.setValueAtTime(0.25, audioCtx.currentTime); osc.start(); osc.stop(audioCtx.currentTime + 0.4); }
+        if (type === "zap") { osc.type = "sawtooth"; osc.frequency.setValueAtTime(420, audioCtx.currentTime); osc.frequency.exponentialRampToValueAtTime(30, audioCtx.currentTime + 0.12); gain.gain.setValueAtTime(0.3, audioCtx.currentTime); osc.start(); osc.stop(audioCtx.currentTime + 0.12); }
+        else if (type === "ding") { osc.type = "sine"; osc.frequency.setValueAtTime(880, audioCtx.currentTime); osc.frequency.linearRampToValueAtTime(1200, audioCtx.currentTime + 0.06); gain.gain.setValueAtTime(0.15, audioCtx.currentTime); osc.start(); osc.stop(audioCtx.currentTime + 0.06); }
+        else if (type === "boom") { osc.type = "sawtooth"; osc.frequency.setValueAtTime(90, audioCtx.currentTime); osc.frequency.exponentialRampToValueAtTime(15, audioCtx.currentTime + 0.4); gain.gain.setValueAtTime(0.6, audioCtx.currentTime); osc.start(); osc.stop(audioCtx.currentTime + 0.4); }
+        else if (type === "level") { osc.type = "sine"; osc.frequency.setValueAtTime(440, audioCtx.currentTime); osc.frequency.setValueAtTime(554.37, audioCtx.currentTime + 0.08); osc.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.16); gain.gain.setValueAtTime(0.2, audioCtx.currentTime); osc.start(); osc.stop(audioCtx.currentTime + 0.35); }
     }
 
     function updateInputCoordinates(clientX, clientY) {
         if (!gameActive) return; const rect = container.getBoundingClientRect();
-        player.targetX = Math.max(10, Math.min(clientX - rect.left, rect.width - 10));
-        player.targetY = Math.max(10, Math.min(clientY - rect.top, rect.height - 10));
+        player.targetX = Math.max(15, Math.min(clientX - rect.left, rect.width - 15));
+        player.targetY = Math.max(15, Math.min(clientY - rect.top, rect.height - 15));
     }
     container.addEventListener("mousemove", (e) => updateInputCoordinates(e.clientX, e.clientY));
     container.addEventListener("touchstart", (e) => { setupAudio(); if(e.touches.length > 0) updateInputCoordinates(e.touches.clientX, e.touches.clientY); }, { passive: true });
     container.addEventListener("touchmove", (e) => { e.preventDefault(); if(e.touches.length > 0) updateInputCoordinates(e.touches.clientX, e.touches.clientY); }, { passive: false });
 
+    function draw3DFishMesh(x, y, r, isLeft, baseHue, fishType, pulseTick) {
+        ctx.save(); ctx.translate(x, y); if (isLeft) ctx.scale(-1, 1);
+        const wag = Math.sin(pulseTick * 0.2) * (r * 0.25);
+        let finGrd = ctx.createLinearGradient(-r, 0, -r * 2, 0);
+        finGrd.addColorStop(0, `hsl(${baseHue}, 85%, 35%)`); finGrd.addColorStop(1, `hsl(${(baseHue+40)%360}, 90%, 55%)`);
+        ctx.fillStyle = finGrd; ctx.beginPath();
+        if (fishType === 2) {
+            ctx.moveTo(-r * 0.8, 0); ctx.quadraticCurveTo(-r * 1.5, -r * 0.8 + wag, -r * 2, -r * 0.9 + wag); ctx.lineTo(-r * 1.5, wag); ctx.lineTo(-r * 2, r * 0.9 + wag); ctx.quadraticCurveTo(-r * 1.5, r * 0.8 + wag, -r * 0.8, 0);
+        } else {
+            ctx.moveTo(-r * 0.7, 0); ctx.lineTo(-r * 1.8, -r * 0.7 + wag); ctx.lineTo(-r * 1.4, wag); ctx.lineTo(-r * 1.8, r * 0.7 + wag);
+        }
+        ctx.closePath(); ctx.fill();
+        let bodyYScale = fishType === 1 ? 1.0 : (fishType === 2 ? 0.65 : 0.8); ctx.scale(1, bodyYScale);
+        let bodyGrd = ctx.createRadialGradient(r * 0.2, -r * 0.2, r * 0.1, 0, 0, r);
+        bodyGrd.addColorStop(0, `hsl(${(baseHue+20)%360}, 90%, 75%)`); bodyGrd.addColorStop(0.3, `hsl(${baseHue}, 85%, 45%)`); bodyGrd.addColorStop(0.8, `hsl(${baseHue}, 95%, 20%)`); bodyGrd.addColorStop(1, '#01050e');
+        ctx.fillStyle = bodyGrd; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = `hsl(${baseHue}, 60%, 15%)`; ctx.lineWidth = Math.max(1, r*0.06); ctx.beginPath(); ctx.arc(-r * 0.2, 0, r * 0.5, -Math.PI*0.3, Math.PI*0.3); ctx.stroke();
+        ctx.fillStyle = `hsl(${(baseHue+30)%360}, 80%, 40%)`; ctx.beginPath(); ctx.ellipse(-r*0.1, r*0.2, r*0.3, r*0.15, Math.PI*0.15, 0, Math.PI*2); ctx.fill();
+        ctx.scale(1, 1 / bodyYScale); let eyeX = r * 0.5; let eyeY = -r * 0.25; let eyeRadius = Math.max(3, r * 0.22);
+        let eyeGrd = ctx.createRadialGradient(eyeX - eyeRadius*0.2, eyeY - eyeRadius*0.2, 1, eyeX, eyeY, eyeRadius); eyeGrd.addColorStop(0, "#ffffff"); eyeGrd.addColorStop(1, "#94a3b8");
+        ctx.fillStyle = eyeGrd; ctx.beginPath(); ctx.arc(eyeX, eyeY, eyeRadius, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = "#020617"; ctx.beginPath(); ctx.arc(eyeX + eyeRadius*0.2, eyeY, eyeRadius * 0.5, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(eyeX + eyeRadius*0.4, eyeY - eyeRadius*0.2, eyeRadius * 0.15, 0, Math.PI*2); ctx.fill(); ctx.restore();
+    }
     function initiateArcadeGame() {
         setupAudio(); score = 0; gameActive = true; player.radius = 15; player.x = 190; player.y = 240; player.targetX = 190; player.targetY = 240;
-        marineThreats = []; environmentBubbles = []; screenOverlay.style.display = "none"; scoreLabel.innerText = "SCORE: 00000"; sizeLabel.innerText = "SIZE: 15";
-        if(spawnIntervalId) clearInterval(spawnIntervalId); spawnIntervalId = setInterval(generateMarineLife, 1100);
+        marineThreats = []; environmentBubbles = []; screenOverlay.style.display = "none"; scoreLabel.innerText = "SCORE: 00000"; sizeLabel.innerText = "RANK: MINNOW (15)";
+        if(spawnIntervalId) clearInterval(spawnIntervalId); spawnIntervalId = setInterval(generateMarineLife, 1000);
         if(animationFrameId) cancelAnimationFrame(animationFrameId); runGameLoop();
     }
+
     function generateMarineLife() {
         if (!gameActive) return; const spawnFromLeft = Math.random() > 0.5;
-        const minSize = Math.max(6, player.radius - 10), maxSize = player.radius + 18;
-        const sizeRadius = Math.floor(Math.random() * (maxSize - minSize)) + minSize;
-        // 🐟 SLOWED DOWN: Reduced horizontal speed modifier from 2 to 1.1 for slow swimming paths
-        marineThreats.push({ x: spawnFromLeft ? -50 : 430, y: Math.random() * (canvas.height - 40) + 20, radius: sizeRadius, speed: (Math.random() * 1.1 + 0.6) * (spawnFromLeft ? 1 : -1), color: "" });
+        const sizeRadius = Math.floor(Math.random() * (player.radius + 22 - Math.max(6, player.radius - 12))) + Math.max(6, player.radius - 12);
+        const specificType = Math.floor(Math.random() * 3) + 1;
+        marineThreats.push({ x: spawnFromLeft ? -60 : 440, y: Math.random() * (canvas.height - 60) + 30, radius: sizeRadius, speed: (Math.random() * 0.9 + 0.5) * (spawnFromLeft ? 1 : -1), fishType: specificType, loopSeed: Math.random() * 100 });
     }
+
+    function getRankName(r) { if(r < 25) return "MINNOW"; if(r < 40) return "BASS"; if(r < 55) return "TUNA"; return "APEX SHARK"; }
+
     function terminateGameEngine(victory) {
         gameActive = false; clearInterval(spawnIntervalId); cancelAnimationFrame(animationFrameId); screenOverlay.style.display = "flex";
-        if (victory) { sound("level"); overlayTitle.innerText = "👑 APEX PREDATOR 👑"; overlayTitle.style.color = "#eab308"; overlaySub.innerText = `Evolution complete! Final Score Account: ${score}`; actionBtn.innerText = "EVOLVE AGAIN 🔄"; }
-        else { sound("boom"); overlayTitle.innerText = "🐋 WASTED 🐋"; overlayTitle.style.color = "#ef4444"; overlaySub.innerText = `You got consumed! Final Score Log: ${score}`; actionBtn.innerText = "REDEPLOY VENTURE 🔄"; }
+        if (victory) { sound("level"); overlayTitle.innerText = "👑 APEX OCEAN GOD 👑"; overlayTitle.style.color = "#eab308"; overlaySub.innerText = `Evolution completed safely! Final Score: ${score}`; actionBtn.innerText = "RESTART EVOLUTION 🔄"; }
+        else { sound("boom"); overlayTitle.innerText = "🐋 CONSUMED 🐋"; overlayTitle.style.color = "#ef4444"; overlaySub.innerText = `You became organic mass. Final Score: ${score}`; actionBtn.innerText = "REDEPLOY DESCENT 🔄"; }
     }
+
     function runGameLoop() {
-        if (!gameActive) return; ctx.clearRect(0, 0, canvas.width, canvas.height);
-        if (Math.random() < 0.08) environmentBubbles.push({ x: Math.random() * canvas.width, y: 500, r: Math.random() * 3 + 1, speed: Math.random() * 1 + 0.5 });
-        environmentBubbles.forEach((b, i) => { b.y -= b.speed; ctx.fillStyle = "rgba(0, 240, 255, 0.15)"; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2); ctx.fill(); if (b.y < -10) environmentBubbles.splice(i, 1); });
-        let dx = player.targetX - player.x; let dy = player.targetY - player.y; player.x += dx * player.speed; player.y += dy * player.speed; if (dx !== 0) player.facingLeft = dx < 0;
-        ctx.fillStyle = "#00f0ff"; ctx.beginPath(); ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = "#00a8ff"; ctx.beginPath();
-        if (player.facingLeft) { ctx.moveTo(player.x + player.radius, player.y); ctx.lineTo(player.x + player.radius * 1.8, player.y - player.radius * 0.6); ctx.lineTo(player.x + player.radius * 1.8, player.y + player.radius * 0.6); }
-        else { ctx.moveTo(player.x - player.radius, player.y); ctx.lineTo(player.x - player.radius * 1.8, player.y - player.radius * 0.6); ctx.lineTo(player.x - player.radius * 1.8, player.y + player.radius * 0.6); }
-        ctx.closePath(); ctx.fill();
+        if (!gameActive) return; player.tailWag++;
+        let oceanBackground = ctx.createLinearGradient(0, 0, 0, canvas.height); oceanBackground.addColorStop(0, "#041628"); oceanBackground.addColorStop(0.5, "#020f1c"); oceanBackground.addColorStop(1, "#01050d"); ctx.fillStyle = oceanBackground; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "rgba(16, 185, 129, 0.02)"; ctx.beginPath(); ctx.moveTo(60, 0); ctx.lineTo(190, 480); ctx.lineTo(110, 480); ctx.lineTo(20, 0); ctx.closePath(); ctx.fill(); ctx.beginPath(); ctx.moveTo(220, 0); ctx.lineTo(340, 480); ctx.lineTo(260, 480); ctx.lineTo(170, 0); ctx.closePath(); ctx.fill();
+        if (Math.random() < 0.06) environmentBubbles.push({ x: Math.random() * canvas.width, y: 500, r: Math.random() * 2.5 + 1, speed: Math.random() * 0.8 + 0.4 });
+        environmentBubbles.forEach((b, i) => { b.y -= b.speed; ctx.fillStyle = "rgba(52, 211, 153, 0.12)"; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2); ctx.fill(); if (b.y < -10) environmentBubbles.splice(i, 1); });
+        let dx = player.targetX - player.x; let dy = player.targetY - player.y; player.x += dx * player.speed; player.y += dy * player.speed; if (dx !== 0 && Math.abs(dx) > 1) player.facingLeft = dx < 0;
+        draw3DFishMesh(player.x, player.y, player.radius, player.facingLeft, 185, 3, player.tailWag);
         marineThreats.forEach((t, index) => {
-            t.x += t.speed; t.color = t.radius < player.radius ? "#22c55e" : "#ef4444"; ctx.fillStyle = t.color; ctx.beginPath(); ctx.arc(t.x, t.y, t.radius, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = "rgba(0,0,0,0.2)"; ctx.beginPath();
-            if (t.speed > 0) { ctx.moveTo(t.x - t.radius, t.y); ctx.lineTo(t.x - t.radius * 1.7, t.y - t.radius * 0.5); ctx.lineTo(t.x - t.radius * 1.7, t.y + t.radius * 0.5); }
-            else { ctx.moveTo(t.x + t.radius, t.y); ctx.lineTo(t.x + t.radius * 1.7, t.y - t.radius * 0.5); ctx.lineTo(t.x + t.radius * 1.7, t.y + t.radius * 0.5); }
-            ctx.closePath(); ctx.fill();
-            let collisionDistance = Math.hypot(player.x - t.x, player.y - t.y);
-            if (collisionDistance < player.radius + t.radius * 0.8) {
-                if (player.radius >= t.radius) { sound("ding"); score += Math.floor(t.radius * 10); player.radius += t.radius * 0.12; marineThreats.splice(index, 1); scoreLabel.innerText = "SCORE: " + String(score).padStart(5, '0'); sizeLabel.innerText = "SIZE: " + Math.floor(player.radius); if (player.radius >= 55) terminateGameEngine(true); }
+            t.x += t.speed; t.loopSeed++; const isTargetEdible = t.radius < player.radius; const dynamicHue = isTargetEdible ? 140 : 0;
+            draw3DFishMesh(t.x, t.y, t.radius, t.speed < 0, dynamicHue, t.fishType, t.loopSeed);
+            let distance = Math.hypot(player.x - t.x, player.y - t.y);
+            if (distance < player.radius + t.radius * 0.75) {
+                if (isTargetEdible) { sound("ding"); score += Math.floor(t.radius * 12); player.radius += t.radius * 0.11; marineThreats.splice(index, 1); scoreLabel.innerText = "SCORE: " + String(score).padStart(5, '0'); sizeLabel.innerText = `RANK: ${getRankName(player.radius)} (${Math.floor(player.radius)})`; if (player.radius >= 55) terminateGameEngine(true); }
                 else { terminateGameEngine(false); }
             }
-            if ((t.speed > 0 && t.x > 450) || (t.speed < 0 && t.x < -60)) marineThreats.splice(index, 1);
+            if ((t.speed > 0 && t.x > 460) || (t.speed < 0 && t.x < -60)) marineThreats.splice(index, 1);
         });
         animationFrameId = requestAnimationFrame(runGameLoop);
     }
@@ -111,4 +137,5 @@ game_html = """
 </body>
 </html>
 """
+
 components.html(game_html, height=520, scrolling=False)
