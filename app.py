@@ -30,7 +30,7 @@ game_html = """
         <div id="screenOverlay">
             <h2 id="overlayTitle" style="color: #00f0ff; letter-spacing: 2px;">FEEDING FRENZY</h2>
             <p id="overlaySub" style="color: #64748b; font-size: 12px; max-width: 280px;">Eat smaller fish to grow. Avoid larger ocean predators!</p>
-            <button class="arcade-btn" id="actionBtn" onclick="initiateArcadeGame()">START VENTURE 🎮</button>
+            <button class="arcade-btn" id="actionBtn" onclick="initiateArcadeGame()">START VENTURE </button>
         </div>
         <canvas id="aquariumCanvas" width="380" height="480"></canvas>
     </div>
