@@ -43,7 +43,8 @@ game_html = """
     const actionBtn = document.getElementById("actionBtn");
 
     let score = 0, gameActive = false;
-    let player = { x: 190, y: 240, radius: 15, targetX: 190, targetY: 240, speed: 0.12, facingLeft: false };
+    // 🐟 SLOWED DOWN: Reduced player tracking speed from 0.12 to 0.05 for smoother response
+    let player = { x: 190, y: 240, radius: 15, targetX: 190, targetY: 240, speed: 0.05, facingLeft: false };
     let marineThreats = []; let environmentBubbles = [];
     let animationFrameId = null, spawnIntervalId = null, audioCtx = null;
 
@@ -65,18 +66,18 @@ game_html = """
     container.addEventListener("touchstart", (e) => { setupAudio(); if(e.touches.length > 0) updateInputCoordinates(e.touches.clientX, e.touches.clientY); }, { passive: true });
     container.addEventListener("touchmove", (e) => { e.preventDefault(); if(e.touches.length > 0) updateInputCoordinates(e.touches.clientX, e.touches.clientY); }, { passive: false });
 
-    // Instantly activates loops without crashing the DOM context parameters
     function initiateArcadeGame() {
         setupAudio(); score = 0; gameActive = true; player.radius = 15; player.x = 190; player.y = 240; player.targetX = 190; player.targetY = 240;
         marineThreats = []; environmentBubbles = []; screenOverlay.style.display = "none"; scoreLabel.innerText = "SCORE: 00000"; sizeLabel.innerText = "SIZE: 15";
-        if(spawnIntervalId) clearInterval(spawnIntervalId); spawnIntervalId = setInterval(generateMarineLife, 900);
+        if(spawnIntervalId) clearInterval(spawnIntervalId); spawnIntervalId = setInterval(generateMarineLife, 1100);
         if(animationFrameId) cancelAnimationFrame(animationFrameId); runGameLoop();
     }
     function generateMarineLife() {
         if (!gameActive) return; const spawnFromLeft = Math.random() > 0.5;
         const minSize = Math.max(6, player.radius - 10), maxSize = player.radius + 18;
         const sizeRadius = Math.floor(Math.random() * (maxSize - minSize)) + minSize;
-        marineThreats.push({ x: spawnFromLeft ? -50 : 430, y: Math.random() * (canvas.height - 40) + 20, radius: sizeRadius, speed: (Math.random() * 2 + 1.2) * (spawnFromLeft ? 1 : -1), color: "" });
+        // 🐟 SLOWED DOWN: Reduced horizontal speed modifier from 2 to 1.1 for slow swimming paths
+        marineThreats.push({ x: spawnFromLeft ? -50 : 430, y: Math.random() * (canvas.height - 40) + 20, radius: sizeRadius, speed: (Math.random() * 1.1 + 0.6) * (spawnFromLeft ? 1 : -1), color: "" });
     }
     function terminateGameEngine(victory) {
         gameActive = false; clearInterval(spawnIntervalId); cancelAnimationFrame(animationFrameId); screenOverlay.style.display = "flex";
@@ -110,5 +111,4 @@ game_html = """
 </body>
 </html>
 """
-
 components.html(game_html, height=520, scrolling=False)
