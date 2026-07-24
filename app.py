@@ -6,7 +6,7 @@ st.set_page_config(page_title="Virtua Arcade: Feeding Frenzy 3D", layout="center
 st.title("🐋 Virtua Arcade: Feeding Frenzy 3D Evolution")
 st.caption("Drag your finger or cursor to navigate the depths. Consume green-tinted prey, avoid red alpha predators!")
 
-# Part A: Setup the structural HTML headers and abyssal theme stylings
+# Part A: Setup structural canvas borders and the deep-sea dark palette layout
 game_html = r"""
 <!DOCTYPE html>
 <html>
@@ -23,7 +23,7 @@ game_html = r"""
     </style>
 </head>
 """
-# Part B: Append layout nodes, interactive menus, and mouse/touch vector trackers
+# Part B: Append dynamic interface menus and stabilized single-finger array element interceptors
 game_html += r"""
 <body>
     <div id="gameContainer">
@@ -65,11 +65,25 @@ game_html += r"""
         player.targetX = Math.max(15, Math.min(clientX - rect.left, rect.width - 15));
         player.targetY = Math.max(15, Math.min(clientY - rect.top, rect.height - 15));
     }
+    
+    // Stabilized Multi-Device Handlers: Explicitly locking index zero array values for touch targets
     container.addEventListener("mousemove", (e) => updateInputCoordinates(e.clientX, e.clientY));
-    container.addEventListener("touchstart", (e) => { setupAudio(); if(e.touches.length > 0) updateInputCoordinates(e.touches.clientX, e.touches.clientY); }, { passive: true });
-    container.addEventListener("touchmove", (e) => { e.preventDefault(); if(e.touches.length > 0) updateInputCoordinates(e.touches.clientX, e.touches.clientY); }, { passive: false });
+    
+    container.addEventListener("touchstart", (e) => { 
+        setupAudio(); 
+        if(e.touches && e.touches.length > 0) {
+            updateInputCoordinates(e.touches[0].clientX, e.touches[0].clientY); 
+        }
+    }, { passive: true });
+    
+    container.addEventListener("touchmove", (e) => { 
+        e.preventDefault(); // Disables phone viewport screen-bounce
+        if(e.touches && e.touches.length > 0) {
+            updateInputCoordinates(e.touches[0].clientX, e.touches[0].clientY); 
+        }
+    }, { passive: false });
 """
-# Part C: Inject the math vectors that render lighting reflections and organic fin movements
+# Part C: Inject the 3D asset vectors that draw lighting reflections, gills, and animated fins
 game_html += r"""
     function draw3DFishMesh(x, y, r, isLeft, baseHue, fishType, pulseTick) {
         ctx.save(); ctx.translate(x, y); if (isLeft) ctx.scale(-1, 1);
@@ -96,7 +110,7 @@ game_html += r"""
         ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(eyeX + eyeRadius*0.4, eyeY - eyeRadius*0.2, eyeRadius * 0.15, 0, Math.PI*2); ctx.fill(); ctx.restore();
     }
 """
-# Part D: Manage state rules, collision detection logic, and load the component live into Streamlit
+# Part D: Process game logic ticks and inject the final interactive window wrapper safely into Streamlit
 game_html += r"""
     function initiateArcadeGame() {
         setupAudio(); score = 0; gameActive = true; player.radius = 15; player.x = 190; player.y = 240; player.targetX = 190; player.targetY = 240;
