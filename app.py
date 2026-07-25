@@ -75,13 +75,6 @@ game_html = r"""
         .menu-btn.danger { background: rgba(239, 68, 68, 0.12); color: #f87171; border-color: rgba(239,68,68,0.5); }
         .menu-btn.danger:hover { background: rgba(239, 68, 68, 0.24); }
 
-        /* Chapter complete popup — shown when the chapter's fish quota is fully eaten */
-        #chapterCompleteOverlay { position: absolute; inset: 0; background: rgba(1, 8, 16, 0.82); backdrop-filter: blur(6px); display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 26; text-align: center; }
-        #chapterCompleteCard { background: rgba(4, 26, 38, 0.94); border: 1px solid rgba(52, 211, 153, 0.45); border-radius: 18px; padding: 32px 34px; box-shadow: 0 18px 50px rgba(0,0,0,0.6); min-width: 280px; }
-        #chapterCompleteEyebrow { color: #34d399; letter-spacing: 4px; font-size: 11px; text-shadow: 0 0 10px #047857; }
-        #chapterCompleteTitle { color: #ffffff; letter-spacing: 3px; font-size: 24px; margin: 8px 0 6px; text-shadow: 0 0 16px rgba(52,211,153,0.8); }
-        #chapterCompleteSub { color: #94a3b8; font-size: 12px; line-height: 1.6; max-width: 300px; margin: 0 auto 10px; }
-        #chapterCompleteNext { color: #7dd3c8; font-size: 11px; letter-spacing: 2px; margin-bottom: 20px; }
         .arcade-btn { margin-top: 20px; padding: 14px 30px; background: #10b981; color: #01040a; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4); font-family: monospace; font-size: 14px; letter-spacing: 1px; transition: transform 0.1s; }
         .arcade-btn:active { transform: scale(0.95); }
         #overlayExitBtn { margin-top: 12px; background: none; border: 1px solid rgba(148,163,184,0.4); color: #94a3b8; padding: 10px 24px; border-radius: 8px; font-family: monospace; font-size: 12px; letter-spacing: 2px; cursor: pointer; }
@@ -100,7 +93,7 @@ game_html += r"""
                 </button>
                 <div id="scoreLabel">SCORE: 00000</div>
             </div>
-            <div id="sizeLabel">RANK: MINNOW (15)</div>
+            <div id="sizeLabel">SIZE: SMALL  0/10</div>
         </div>
         <div id="chapterLabel" style="display:none;">MAP 1 / 5 — CORAL SHALLOWS</div>
 
@@ -131,21 +124,20 @@ game_html += r"""
             </div>
         </div>
 
-        <div id="chapterCompleteOverlay">
-            <div id="chapterCompleteCard">
-                <div id="chapterCompleteEyebrow">CHAPTER <span id="chapterCompleteNum">1</span> OF 5 CLEARED</div>
-                <h2 id="chapterCompleteTitle">CHAPTER COMPLETE</h2>
-                <p id="chapterCompleteSub">You devoured every fish in the CORAL SHALLOWS.</p>
-                <div id="chapterCompleteNext">NEXT: KELP FOREST</div>
-                <button class="menu-btn primary" id="chapterContinueBtn">CONTINUE ▶</button>
-            </div>
-        </div>
-
         <div id="screenOverlay">
             <h2 id="overlayTitle" style="color: #10b981; letter-spacing: 3px; font-size: 26px; margin: 0;">GAME OVER</h2>
             <p id="overlaySub" style="color: #64748b; font-size: 12px; max-width: 320px; line-height: 1.6; margin-top: 10px;"></p>
             <button class="arcade-btn" id="actionBtn">REDEPLOY DESCENT 🔄</button>
             <button id="overlayExitBtn">EXIT TO TITLE</button>
+        </div>
+
+        <div id="chapterCompleteOverlay" style="position:absolute; inset:0; background:rgba(1,8,16,0.82); backdrop-filter:blur(6px); display:none; flex-direction:column; align-items:center; justify-content:center; z-index:26; text-align:center;">
+            <div style="background:rgba(4,22,34,0.92); border:1px solid rgba(52,211,153,0.4); border-radius:18px; padding:34px 32px; box-shadow:0 18px 50px rgba(0,0,0,0.55); min-width:280px;">
+                <div style="font-size:11px; letter-spacing:5px; color:#34d399; text-shadow:0 0 10px #047857;">CHAPTER COMPLETED</div>
+                <h2 id="chapterCompleteTitle" style="color:#ffffff; letter-spacing:2px; font-size:24px; margin:8px 0 6px; text-shadow:0 0 16px rgba(52,211,153,0.8);">CORAL SHALLOWS</h2>
+                <p id="chapterCompleteSub" style="color:#94a3b8; font-size:12px; max-width:300px; line-height:1.6; margin:0 auto 4px;">You devoured every fish. Move on to the next chapter!</p>
+                <button class="menu-btn primary" id="continueBtn" style="margin-top:22px;">PRESS TO CONTINUE ▶</button>
+            </div>
         </div>
 
         <canvas id="aquariumCanvas"></canvas>
@@ -166,13 +158,22 @@ game_html += r"""
     const chapterBannerNum = document.getElementById("chapterBannerNum");
     const chapterBannerTitle = document.getElementById("chapterBannerTitle");
     const chapterCompleteOverlay = document.getElementById("chapterCompleteOverlay");
-    const chapterCompleteNum = document.getElementById("chapterCompleteNum");
+    const chapterCompleteTitle = document.getElementById("chapterCompleteTitle");
     const chapterCompleteSub = document.getElementById("chapterCompleteSub");
-    const chapterCompleteNext = document.getElementById("chapterCompleteNext");
-    const chapterContinueBtn = document.getElementById("chapterContinueBtn");
+    const continueBtn = document.getElementById("continueBtn");
+
+    // ---- Discrete fish-size progression ----
+    // Player has 4 fixed sizes per chapter: small -> medium -> big -> large.
+    // Eating FISH_PER_TIER edible fish transforms the player to the next size.
+    // Finishing the LARGE tier (eating its full quota) completes the chapter.
+    const TIER_RADII = [15, 24, 34, 46];                 // small, medium, big, large
+    const TIER_NAMES = ["SMALL", "MEDIUM", "BIG", "LARGE"];
+    const FISH_PER_TIER = 10;
+    // Four discrete prey/threat size classes fish are spawned at.
+    const FISH_SIZE_CLASSES = [10, 19, 29, 41];
 
     let score = 0, gameActive = false, gamePaused = false, timeTick = 0, lastTimestamp = null;
-    let player = { x: 190, y: 240, vx: 0, vy: 0, radius: 15, targetX: 190, targetY: 240, facingLeft: false, tailWag: 0, tiltAngle: 0 };
+    let player = { x: 190, y: 240, vx: 0, vy: 0, radius: 15, targetX: 190, targetY: 240, facingLeft: false, tailWag: 0, tiltAngle: 0, tier: 0, eatenThisTier: 0 };
     let marineThreats = []; let environmentBubbles = []; let particles = []; let kelpFronds = [];
     let reefRocks = []; let reefCorals = []; let reefAnemones = [];
     // Volumetric god-ray definitions (offset from centre, width, drift speed, base alpha)
@@ -199,85 +200,10 @@ game_html += r"""
         { bands: ["#e8fff3", "#33c48a", "#0e4a32"], finColor: "#ffe37a", maskColor: "#06231a" },   // parrotfish green
         { bands: ["#f4ffe8", "#9ad14a", "#3d5c14"], finColor: "#ffb84d", maskColor: "#16240a" },   // olive wrasse (kelp)
         { bands: ["#d9f4ff", "#4aa8c9", "#123a4a"], finColor: "#c9f2ff", maskColor: "#04141c" },   // silver-blue baitfish (rocky/open)
-        { bands: ["#2a2540", "#4b3a78", "#120f24"], finColor: "#7de8d8", maskColor: "#050414" },   // 7 bioluminescent deep-fish (twilight)
-        { bands: ["#1c1230", "#33205c", "#0a0618"], finColor: "#ff5fb0", maskColor: "#04020a" },   // 8 deep-sea anglerfish cousin (abyss)
-        { bands: ["#ffe1d6", "#e04a3c", "#6e120c"], finColor: "#ffd24d", maskColor: "#2a0806" },   // 9 crimson snapper (rocky drop-off)
-        { bands: ["#eef7ff", "#7fb9cf", "#20586c"], finColor: "#d7f2ff", maskColor: "#0a2029" },   // 10 teal-silver sardine (kelp forest)
-        { bands: ["#2a1436", "#a02fb0", "#3d0a52"], finColor: "#ff7ae0", maskColor: "#0c0316" },   // 11 magenta glow fish (twilight trench)
-        { bands: ["#eef2f4", "#9fb4bd", "#3c4d55"], finColor: "#cfeff7", maskColor: "#101a1f" },   // 12 ghost-white abyss fish (abyssal deep)
-        { bands: ["#ffedcf", "#f0902b", "#151007"], finColor: "#1c1c1c", maskColor: "#0d0803" },   // 13 tiger reef fish (coral shallows)
+        { bands: ["#2a2540", "#4b3a78", "#120f24"], finColor: "#7de8d8", maskColor: "#050414" },   // bioluminescent deep-fish (twilight/abyss)
+        { bands: ["#1c1230", "#33205c", "#0a0618"], finColor: "#ff5fb0", maskColor: "#04020a" },   // deep-sea anglerish cousin (abyss)
     ];
     const PLAYER_SPECIES = { bands: ["#eafff5", "#10b981", "#04351f"], finColor: "#facc15", maskColor: "#04120b" };
-
-    /* ---------- real fish-art sprites ----------
-       Photo/painting fish the player wants to replicate in-game. Each source image is mapped onto one or
-       more species indices so it shows up in the matching biome. The source pictures have solid
-       backgrounds, so on load we chroma-key the background out with a corner flood-fill (only contiguous
-       background-coloured pixels are cleared, so colours inside the fish are preserved), then feather the
-       cut edge. The processed result is stored as a <canvas> on the species object (species.sprite) and
-       drawn by drawRealisticFish in place of the procedural body. facesLeft flags art that points left so
-       we can normalise every sprite to "faces right" and let the existing flip-by-direction logic work. */
-    const SPRITE_DEFS = [
-        { url: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/fish%204.JPG-cPT8IqJ619mUp4JPyHP6Q6Z9hF0ARn.jpeg", facesLeft: false, idxs: [2, 13] }, // tropical orange + magenta stripes -> coral shallows
-        { url: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/fish%202.JPG-0gP9HlMIcY6bYNrkJwIx9PNbbVwBpD.jpeg", facesLeft: true,  idxs: [5] },      // green + yellow banded tang -> kelp forest
-        { url: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/fish%203.JPG-hzUZSuBtoiQErX4NsPQeEMD3zQ4eTV.jpeg", facesLeft: false, idxs: [6, 1] },   // golden woven-body fish -> rocky drop-off
-        { url: "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/fish%20one.JPG-aT2bTyCwOxu1eicHXklNBmUBozYW4l.jpeg", facesLeft: true, idxs: [7, 8] },   // green deep-sea anglerfish -> twilight + abyss
-    ];
-
-    // Remove the solid background of a loaded fish photo via a corner-seeded flood fill, then soften the
-    // cut edge so the sprite blends into the dark water instead of showing a hard rectangle.
-    function chromaKeySprite(img) {
-        const w = img.naturalWidth, h = img.naturalHeight;
-        const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
-        const g = cv.getContext("2d"); g.drawImage(img, 0, 0);
-        let imgData;
-        try { imgData = g.getImageData(0, 0, w, h); } catch (e) { return cv; } // tainted (CORS) -> use raw image
-        const px = imgData.data;
-        const visited = new Uint8Array(w * h);
-        const tol = 46; // per-channel-sum tolerance for "same as background"
-        const stack = [];
-        const corners = [[0, 0], [w - 1, 0], [0, h - 1], [w - 1, h - 1]];
-        for (let c = 0; c < corners.length; c++) {
-            const cx = corners[c][0], cy = corners[c][1], ci = (cy * w + cx) * 4;
-            stack.push(cx, cy, px[ci], px[ci + 1], px[ci + 2]);
-        }
-        while (stack.length) {
-            const b0 = stack.pop(), g0 = stack.pop(), r0 = stack.pop(), y = stack.pop(), x = stack.pop();
-            if (x < 0 || y < 0 || x >= w || y >= h) continue;
-            const p = y * w + x;
-            if (visited[p]) continue;
-            const i = p * 4;
-            const d = Math.abs(px[i] - r0) + Math.abs(px[i + 1] - g0) + Math.abs(px[i + 2] - b0);
-            if (d > tol * 3) continue;
-            visited[p] = 1; px[i + 3] = 0;
-            stack.push(x + 1, y, r0, g0, b0); stack.push(x - 1, y, r0, g0, b0);
-            stack.push(x, y + 1, r0, g0, b0); stack.push(x, y - 1, r0, g0, b0);
-        }
-        // Feather: fade any opaque pixel that borders a cleared pixel so the silhouette edge is soft.
-        for (let y = 1; y < h - 1; y++) {
-            for (let x = 1; x < w - 1; x++) {
-                const p = y * w + x;
-                if (visited[p]) continue;
-                if (visited[p - 1] || visited[p + 1] || visited[p - w] || visited[p + w]) px[p * 4 + 3] = 130;
-            }
-        }
-        g.putImageData(imgData, 0, 0);
-        return cv;
-    }
-
-    function loadFishSprites() {
-        SPRITE_DEFS.forEach(def => {
-            const img = new Image();
-            img.crossOrigin = "anonymous";
-            img.onload = () => {
-                const canvas = chromaKeySprite(img);
-                def.idxs.forEach(idx => { if (FISH_SPECIES[idx]) FISH_SPECIES[idx].sprite = { canvas, facesLeft: def.facesLeft }; });
-            };
-            img.src = def.url;
-        });
-    }
-    loadFishSprites();
-
 
     /* ---------- 5 chapter maps ----------
        As the player grows, the game descends through 5 distinct biomes: brighter/shallower to
@@ -285,40 +211,38 @@ game_html += r"""
        background "cast" (schooling fish, jellyfish, cruising megafauna, a landmark silhouette). */
     const CHAPTERS = [
         {
-            name: "CORAL SHALLOWS", minRadius: 0, quota: 10,
+            name: "CORAL SHALLOWS", minRadius: 0,
             sky: ["#0a3a52", "#062338", "#01131f"], fog: "2, 24, 34", rayStrength: 1.15,
-            coralAmberBias: 0.5, speciesPool: [0, 1, 2, 13], kelpDensity: 0.4,
+            coralAmberBias: 0.5, speciesPool: [0, 1, 2, 3, 4], kelpDensity: 0.4,
             schoolCount: 3, jellyfishCount: 0, megafauna: "turtle", megafaunaChance: 0.55, landmark: "none",
         },
         {
-            name: "KELP FOREST", minRadius: 23, quota: 11,
+            name: "KELP FOREST", minRadius: 23,
             sky: ["#0a3a2e", "#062a24", "#010f14"], fog: "3, 30, 26", rayStrength: 0.95,
-            coralAmberBias: 0.3, speciesPool: [4, 5, 10], kelpDensity: 1.6,
+            coralAmberBias: 0.3, speciesPool: [0, 4, 5, 3, 1], kelpDensity: 1.6,
             schoolCount: 5, jellyfishCount: 1, megafauna: "turtle", megafaunaChance: 0.4, landmark: "none",
         },
         {
-            name: "ROCKY DROP-OFF", minRadius: 32, quota: 12,
+            name: "ROCKY DROP-OFF", minRadius: 32,
             sky: ["#0c2e4a", "#071b30", "#010a16"], fog: "3, 20, 32", rayStrength: 0.75,
-            coralAmberBias: 0.35, speciesPool: [6, 9, 3], kelpDensity: 0.7,
+            coralAmberBias: 0.35, speciesPool: [6, 0, 3, 5, 2], kelpDensity: 0.7,
             schoolCount: 6, jellyfishCount: 2, megafauna: "ray", megafaunaChance: 0.5, landmark: "shipwreck",
         },
         {
-            name: "TWILIGHT TRENCH", minRadius: 42, quota: 13,
+            name: "TWILIGHT TRENCH", minRadius: 42,
             sky: ["#141034", "#0a0a24", "#030312"], fog: "6, 10, 30", rayStrength: 0.4,
-            coralAmberBias: 0.15, speciesPool: [7, 11], kelpDensity: 0.25,
+            coralAmberBias: 0.15, speciesPool: [7, 6, 3, 8], kelpDensity: 0.25,
             schoolCount: 4, jellyfishCount: 4, megafauna: "ray", megafaunaChance: 0.35, landmark: "shipwreck",
         },
         {
-            name: "ABYSSAL DEEP", minRadius: 52, quota: 14,
+            name: "ABYSSAL DEEP", minRadius: 52,
             sky: ["#0a0620", "#050312", "#000006"], fog: "10, 4, 24", rayStrength: 0.15,
-            coralAmberBias: 0.05, speciesPool: [8, 12], kelpDensity: 0.05,
+            coralAmberBias: 0.05, speciesPool: [7, 8], kelpDensity: 0.05,
             schoolCount: 2, jellyfishCount: 6, megafauna: "none", megafaunaChance: 0, landmark: "ruins",
         },
     ];
     const WIN_RADIUS = 65;
     let currentChapter = 0;
-    let eatenThisChapter = 0;   // edible fish consumed in the current chapter (drives quota-based completion)
-    let chapterComplete = false; // true while the "Chapter Complete" popup is up and the loop is frozen
     let chapterBannerTimer = 0;
     let schoolFish = []; let jellyfish = []; let megafaunaCreature = null; let landmarkDecor = null;
 
@@ -455,43 +379,27 @@ game_html += r"""
         else if (type === "boom") { osc.type = "sawtooth"; osc.frequency.setValueAtTime(90, audioCtx.currentTime); osc.frequency.exponentialRampToValueAtTime(15, audioCtx.currentTime + 0.4); gain.gain.setValueAtTime(0.6, audioCtx.currentTime); osc.start(); osc.stop(audioCtx.currentTime + 0.4); }
         else if (type === "level") { osc.type = "sine"; osc.frequency.setValueAtTime(440, audioCtx.currentTime); osc.frequency.setValueAtTime(554.37, audioCtx.currentTime + 0.08); osc.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.16); gain.gain.setValueAtTime(0.2, audioCtx.currentTime); osc.start(); osc.stop(audioCtx.currentTime + 0.35); }
         else if (type === "crunch") {
-            // Classic "feeding frenzy" bite: a crisp filtered noise burst (the crunch) + a quick high snap +
-            // a low thump (the weight of the bite). Pitch is nudged per-bite so repeated eats don't feel robotic.
+            // Classic "feeding frenzy" bite: a short filtered noise burst (the crunch) layered over a low thump (the weight of the bite)
             osc.disconnect(); gain.disconnect();
             const now = audioCtx.currentTime;
-            const wobble = 0.9 + Math.random() * 0.2;   // per-bite pitch/character variation
-
-            // --- main crunch: shaped noise, snappier decay for a drier "chomp" ---
-            const bufferSize = Math.floor(audioCtx.sampleRate * 0.12);
+            const bufferSize = Math.floor(audioCtx.sampleRate * 0.14);
             const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
             const data = buffer.getChannelData(0);
             for (let i = 0; i < bufferSize; i++) {
-                const decay = Math.pow(1 - i / bufferSize, 3.2);
+                const decay = Math.pow(1 - i / bufferSize, 2.6);
                 data[i] = (Math.random() * 2 - 1) * decay;
             }
             const noise = audioCtx.createBufferSource(); noise.buffer = buffer;
-            const bandpass = audioCtx.createBiquadFilter(); bandpass.type = "bandpass"; bandpass.frequency.value = (1650 + Math.random() * 600) * wobble; bandpass.Q.value = 1.4;
-            const noiseGain = audioCtx.createGain(); noiseGain.gain.setValueAtTime(0.6, now); noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.11);
+            const bandpass = audioCtx.createBiquadFilter(); bandpass.type = "bandpass"; bandpass.frequency.value = 1500 + Math.random() * 500; bandpass.Q.value = 0.7;
+            const noiseGain = audioCtx.createGain(); noiseGain.gain.setValueAtTime(0.55, now); noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.13);
             noise.connect(bandpass); bandpass.connect(noiseGain); noiseGain.connect(audioCtx.destination);
-            noise.start(now); noise.stop(now + 0.12);
+            noise.start(now); noise.stop(now + 0.14);
 
-            // --- high snap: very short highpassed click for the "bite" transient ---
-            const snapSize = Math.floor(audioCtx.sampleRate * 0.03);
-            const snapBuf = audioCtx.createBuffer(1, snapSize, audioCtx.sampleRate);
-            const snapData = snapBuf.getChannelData(0);
-            for (let i = 0; i < snapSize; i++) snapData[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / snapSize, 5);
-            const snap = audioCtx.createBufferSource(); snap.buffer = snapBuf;
-            const highpass = audioCtx.createBiquadFilter(); highpass.type = "highpass"; highpass.frequency.value = 3200;
-            const snapGain = audioCtx.createGain(); snapGain.gain.setValueAtTime(0.35, now); snapGain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
-            snap.connect(highpass); highpass.connect(snapGain); snapGain.connect(audioCtx.destination);
-            snap.start(now); snap.stop(now + 0.04);
-
-            // --- low thump: the satisfying weight of the swallow ---
             const thumpOsc = audioCtx.createOscillator(); const thumpGain = audioCtx.createGain();
-            thumpOsc.type = "sine"; thumpOsc.frequency.setValueAtTime(180 * wobble, now); thumpOsc.frequency.exponentialRampToValueAtTime(46, now + 0.1);
-            thumpGain.gain.setValueAtTime(0.45, now); thumpGain.gain.exponentialRampToValueAtTime(0.001, now + 0.11);
+            thumpOsc.type = "sine"; thumpOsc.frequency.setValueAtTime(170, now); thumpOsc.frequency.exponentialRampToValueAtTime(48, now + 0.09);
+            thumpGain.gain.setValueAtTime(0.4, now); thumpGain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
             thumpOsc.connect(thumpGain); thumpGain.connect(audioCtx.destination);
-            thumpOsc.start(now); thumpOsc.stop(now + 0.11);
+            thumpOsc.start(now); thumpOsc.stop(now + 0.1);
         }
     }
 
@@ -527,7 +435,7 @@ game_html += r"""
 
     /* ---------- Pause / Restart / Exit ---------- */
     function pauseGame() {
-        if (!gameActive || gamePaused || chapterComplete) return;
+        if (!gameActive || gamePaused) return;
         gamePaused = true;
         if (animationFrameId) { cancelAnimationFrame(animationFrameId); animationFrameId = null; }
         if (spawnIntervalId) { clearInterval(spawnIntervalId); spawnIntervalId = null; }
@@ -543,7 +451,11 @@ game_html += r"""
         if (!spawnIntervalId) spawnIntervalId = setInterval(generateMarineLife, 650);
         if (!animationFrameId) animationFrameId = requestAnimationFrame(runGameLoop);
     }
-    function togglePause() { gamePaused ? resumeGame() : pauseGame(); }
+    function togglePause() {
+        // Ignore pause/resume while the chapter-complete message box is open.
+        if (chapterCompleteOverlay.style.display === "flex") return;
+        gamePaused ? resumeGame() : pauseGame();
+    }
 
     function exitToTitle() {
         gameActive = false; gamePaused = false;
@@ -551,8 +463,6 @@ game_html += r"""
         if (spawnIntervalId) { clearInterval(spawnIntervalId); spawnIntervalId = null; }
         pauseOverlay.style.display = "none";
         screenOverlay.style.display = "none";
-        chapterCompleteOverlay.style.display = "none";
-        chapterComplete = false;
         hud.style.display = "none";
         chapterLabel.style.display = "none";
         chapterBanner.classList.remove("show");
@@ -568,7 +478,6 @@ game_html += r"""
     exitBtn.addEventListener("click", (e) => { e.stopPropagation(); exitToTitle(); });
     actionBtn.addEventListener("click", (e) => { e.stopPropagation(); initiateArcadeGame(); });
     overlayExitBtn.addEventListener("click", (e) => { e.stopPropagation(); exitToTitle(); });
-    chapterContinueBtn.addEventListener("click", (e) => { e.stopPropagation(); continueToNextChapter(); });
 
     window.addEventListener("keydown", (e) => {
         const k = e.key.toLowerCase();
@@ -885,45 +794,6 @@ game_html += r"""
         // contact shadow (depth cue)
         ctx.save(); ctx.globalAlpha = 0.16; ctx.fillStyle = "#000814"; ctx.beginPath(); ctx.ellipse(r * 0.05, r * (0.95 * bodyYScale + 0.35), r * 0.95, r * 0.22, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();
 
-        // ---- real fish-art sprite path: if this species has a prepared sprite, draw the photo instead
-        // of the procedural body, but ANIMATE it so it swims like the vector fish. We slice the image into
-        // vertical strips and offset each strip with a sine wave that travels head->tail, producing the
-        // classic body undulation. Layered on top: a vertical swim bob and a slow body roll. ----
-        if (species.sprite && species.sprite.canvas) {
-            const sp = species.sprite, cv = sp.canvas;
-            const spriteW = r * 2.9;                          // footprint roughly matches the procedural fish
-            const spriteH = spriteW * (cv.height / cv.width);
-            const bob = Math.sin(pulseTick * wagSpeed) * r * 0.06;         // whole-body vertical bob
-            const roll = Math.sin(pulseTick * wagSpeed * 0.5) * 0.06;      // slow lazy body roll
-            ctx.save();
-            if (sp.facesLeft) ctx.scale(-1, 1);               // normalise art so "default" faces right
-            ctx.imageSmoothingEnabled = true;
-            ctx.translate(0, bob);
-            ctx.rotate(roll);
-
-            const strips = 22;                                 // more strips = smoother wave
-            const srcStripW = cv.width / strips;
-            const dstStripW = spriteW / strips;
-            const amp = r * (0.14 + Math.min(0.12, speedMag * 0.08)); // tail sway grows with speed
-            const waveLen = 2.4;                               // waves along the body length
-            for (let i = 0; i < strips; i++) {
-                // s: 0 at left edge (tail, after facing-right normalisation) -> 1 at right edge (head)
-                const s = i / (strips - 1);
-                const tailFactor = (1 - s) * (1 - s);          // head barely moves, tail swings most
-                const phase = pulseTick * wagSpeed + s * waveLen * Math.PI;
-                const offsetY = Math.sin(phase) * amp * tailFactor;
-                const dstX = -spriteW / 2 + i * dstStripW;
-                ctx.drawImage(
-                    cv, i * srcStripW, 0, srcStripW, cv.height,
-                    dstX, -spriteH / 2 + offsetY, dstStripW + 0.6, spriteH  // +0.6 overlap hides seams
-                );
-            }
-            ctx.restore();
-            ctx.restore(); // closes the ctx.save() at the top of drawRealisticFish
-            return;
-        }
-
-
         // ---- caudal (tail) fin: forked, swept, translucent membrane with ray lines ----
         const tx = -r * 0.92; // peduncle attach point
         let tailGrd = ctx.createLinearGradient(tx, 0, -r * 2.2, 0);
@@ -1105,126 +975,110 @@ game_html += r"""
 # Part E: Faster, frame-rate-independent physics; capped/targeted spawning (max 8 fish, ~3 edible + ~3 not); game loop
 game_html += r"""
     function initiateArcadeGame() {
-        setupAudio(); score = 0; gameActive = true; gamePaused = false; player.radius = 15;
+        setupAudio(); score = 0; gameActive = true; gamePaused = false;
+        player.tier = 0; player.eatenThisTier = 0; player.radius = TIER_RADII[0];
         player.x = canvas.width / 2; player.y = canvas.height / 2; player.targetX = player.x; player.targetY = player.y; player.vx = 0; player.vy = 0;
         marineThreats = []; environmentBubbles = []; particles = []; screenShake = 0; lastTimestamp = null;
-        currentChapter = 0; eatenThisChapter = 0; chapterComplete = false; regenerateKelp(); regenerateReef();
-        screenOverlay.style.display = "none"; pauseOverlay.style.display = "none"; chapterCompleteOverlay.style.display = "none"; titleScreen.style.display = "none"; hud.style.display = "flex";
+        currentChapter = 0; regenerateKelp(); regenerateReef();
+        screenOverlay.style.display = "none"; pauseOverlay.style.display = "none"; titleScreen.style.display = "none"; chapterCompleteOverlay.style.display = "none"; hud.style.display = "flex";
         chapterLabel.style.display = "block";
-        scoreLabel.innerText = "SCORE: 00000"; sizeLabel.innerText = "RANK: MINNOW (15)";
+        scoreLabel.innerText = "SCORE: 00000"; updateSizeHud();
         showChapterBanner(0);
         if (spawnIntervalId) clearInterval(spawnIntervalId); spawnIntervalId = setInterval(generateMarineLife, 650);
         if (animationFrameId) cancelAnimationFrame(animationFrameId); animationFrameId = requestAnimationFrame(runGameLoop);
     }
 
-    // Spawning has three fish kinds:
-    //   - BIG fish   : large edible targets (0.74–0.90 of the player). Eating ALL of them (chapter.quota)
-    //                  completes the chapter. A limited number exist per chapter.
-    //   - SMALL fish : little edible fish that spawn freely so the player always has snacks to grow on.
-    //   - PREDATORS  : bigger-than-player hazards that end the run on contact.
-    // Hard-capped at MAX_FISH_ON_SCREEN, spawned one at a time so the screen never floods.
+    // HUD now shows the player's current size tier and progress toward the next transform.
+    function updateSizeHud() {
+        sizeLabel.innerText = `SIZE: ${TIER_NAMES[player.tier]}  ${player.eatenThisTier}/${FISH_PER_TIER}`;
+    }
+
+    // Freeze the game and show the "Chapter Completed" message box with a Continue button.
+    function showChapterCompleteMenu() {
+        if (animationFrameId) { cancelAnimationFrame(animationFrameId); animationFrameId = null; }
+        if (spawnIntervalId) { clearInterval(spawnIntervalId); spawnIntervalId = null; }
+        gamePaused = true;
+        const isFinal = currentChapter >= CHAPTERS.length - 1;
+        chapterCompleteTitle.innerText = CHAPTERS[currentChapter].name;
+        chapterCompleteSub.innerText = isFinal
+            ? "You cleared the final chapter — you are the apex of the ocean!"
+            : "You devoured every fish. Move on to the next chapter!";
+        continueBtn.innerText = isFinal ? "FINISH ▶" : "PRESS TO CONTINUE ▶";
+        chapterCompleteOverlay.style.display = "flex";
+        sound("level");
+    }
+
+    // Advance to the next chapter (or win), resetting the player back to the SMALL size tier.
+    function continueToNextChapter() {
+        chapterCompleteOverlay.style.display = "none";
+        if (currentChapter >= CHAPTERS.length - 1) { terminateGameEngine(true); return; }
+        currentChapter++;
+        player.tier = 0; player.eatenThisTier = 0; player.radius = TIER_RADII[0];
+        player.targetX = player.x; player.targetY = player.y; player.vx = 0; player.vy = 0;
+        marineThreats = []; particles = []; lastTimestamp = null;
+        regenerateKelp(); regenerateReef();
+        updateSizeHud();
+        showChapterBanner(currentChapter);
+        gamePaused = false;
+        if (spawnIntervalId) clearInterval(spawnIntervalId); spawnIntervalId = setInterval(generateMarineLife, 650);
+        if (animationFrameId) cancelAnimationFrame(animationFrameId); animationFrameId = requestAnimationFrame(runGameLoop);
+    }
+    continueBtn.addEventListener("click", (e) => { e.stopPropagation(); continueToNextChapter(); });
+
+    // Keeps roughly 3 edible + 3 not-yet-edible fish on screen at once, hard-capped at 8 total —
+    // spawns one at a time so the screen never gets flooded in a single burst.
     function generateMarineLife() {
-        if (!gameActive || gamePaused || chapterComplete) return;
+        if (!gameActive || gamePaused) return;
         if (marineThreats.length >= MAX_FISH_ON_SCREEN) return;
-
-        const chapter = CHAPTERS[currentChapter] || CHAPTERS[0];
-        const bigQuota = chapter.quota;
-
-        let bigCount = 0, smallCount = 0, predatorCount = 0;
-        marineThreats.forEach(t => {
-            if (!t.edible) predatorCount++;
-            else if (t.isBig) bigCount++;
-            else smallCount++;
-        });
-
-        // Big fish still owed this chapter (quota minus already-eaten minus those currently swimming).
-        const bigRemaining = bigQuota - eatenThisChapter - bigCount;
-        const needBig = bigRemaining > 0 && bigCount < 2;
-        const needSmall = smallCount < 3;
-        const needPredator = predatorCount < 2;
-        if (!needBig && !needSmall && !needPredator) return;
-
-        // Pick a kind, biasing toward keeping a couple of big targets on screen.
-        let kind;
-        const roll = Math.random();
-        if (needBig && roll < 0.42) kind = "big";
-        else if (needSmall && roll < 0.80) kind = "small";
-        else if (needPredator) kind = "predator";
-        else if (needBig) kind = "big";
-        else if (needSmall) kind = "small";
-        else return;
+        let edibleCount = 0, inedibleCount = 0;
+        marineThreats.forEach(t => { if (t.radius < player.radius) edibleCount++; else inedibleCount++; });
+        const needEdible = edibleCount < TARGET_PER_SIDE; const needInedible = inedibleCount < TARGET_PER_SIDE;
+        if (!needEdible && !needInedible) return;
+        const makeEdible = needEdible && (!needInedible || Math.random() < 0.5);
 
         const spawnFromLeft = Math.random() > 0.5;
-        const pool = chapter.speciesPool;
+        const pool = (CHAPTERS[currentChapter] || CHAPTERS[0]).speciesPool;
         const speciesIdx = pool[Math.floor(Math.random() * pool.length)];
         const specificType = Math.floor(Math.random() * 3) + 1;
-
-        let sizeRadius, edible, isBig;
-        if (kind === "big") {
-            sizeRadius = Math.max(10, player.radius * (0.74 + Math.random() * 0.16)); // 0.74–0.90
-            edible = true; isBig = true;
-        } else if (kind === "small") {
-            sizeRadius = Math.max(6, player.radius * (0.30 + Math.random() * 0.28));   // 0.30–0.58
-            edible = true; isBig = false;
+        // Pick a discrete size class that is edible (smaller) or a threat (>= player) as needed.
+        const edibleSizes = FISH_SIZE_CLASSES.filter(s => s < player.radius);
+        const threatSizes = FISH_SIZE_CLASSES.filter(s => s >= player.radius);
+        let sizeRadius;
+        if (makeEdible && edibleSizes.length) {
+            sizeRadius = edibleSizes[Math.floor(Math.random() * edibleSizes.length)];
+        } else if (threatSizes.length) {
+            sizeRadius = threatSizes[Math.floor(Math.random() * threatSizes.length)];
         } else {
-            sizeRadius = player.radius + (Math.random() * 16 + 6);
-            edible = false; isBig = false;
+            // Large tier: no threats left, keep feeding edible prey.
+            sizeRadius = edibleSizes.length ? edibleSizes[Math.floor(Math.random() * edibleSizes.length)] : FISH_SIZE_CLASSES[0];
         }
-
         const baseY = Math.random() * (canvas.height - 90) + 45;
         const baseSpeed = (Math.random() * 0.55 + 0.5) * (spawnFromLeft ? 1 : -1);
-        marineThreats.push({ x: spawnFromLeft ? -60 : canvas.width + 60, y: baseY, radius: sizeRadius, vx: baseSpeed, vy: 0, fishType: specificType, speciesIdx, wagPhase: Math.random() * 100, edible, isBig });
+        marineThreats.push({ x: spawnFromLeft ? -60 : canvas.width + 60, y: baseY, radius: sizeRadius, vx: baseSpeed, vy: 0, fishType: specificType, speciesIdx, wagPhase: Math.random() * 100 });
     }
 
     function getRankName(r) { if (r < 23) return "MINNOW"; if (r < 32) return "BASS"; if (r < 42) return "TUNA"; if (r < 52) return "BARRACUDA"; return "APEX SHARK"; }
 
-    function updateChapterLabel() {
-        const idx = currentChapter;
-        chapterLabel.innerText = `MAP ${idx + 1} / ${CHAPTERS.length} — ${CHAPTERS[idx].name}  ·  FISH ${eatenThisChapter}/${CHAPTERS[idx].quota}`;
+    function getChapterIndex(r) {
+        let idx = 0;
+        for (let i = 0; i < CHAPTERS.length; i++) { if (r >= CHAPTERS[i].minRadius) idx = i; }
+        return idx;
     }
     function showChapterBanner(idx) {
         chapterBannerNum.innerText = String(idx + 1);
         chapterBannerTitle.innerText = CHAPTERS[idx].name;
-        updateChapterLabel();
+        chapterLabel.innerText = `MAP ${idx + 1} / ${CHAPTERS.length} — ${CHAPTERS[idx].name}`;
         chapterBanner.classList.add("show");
         chapterBannerTimer = 150;
     }
-
-    // Called once the player has eaten the whole chapter quota (the big fish come last).
-    function completeChapter() {
-        chapterComplete = true;
-        if (animationFrameId) { cancelAnimationFrame(animationFrameId); animationFrameId = null; }
-        if (spawnIntervalId) { clearInterval(spawnIntervalId); spawnIntervalId = null; }
-        chapterBanner.classList.remove("show");
-        sound("level");
-
-        const isLast = currentChapter >= CHAPTERS.length - 1;
-        chapterCompleteNum.innerText = String(currentChapter + 1);
-        chapterCompleteSub.innerText = `You devoured every fish in the ${CHAPTERS[currentChapter].name}.`;
-        if (isLast) {
-            chapterCompleteNext.innerText = "THE OCEAN IS YOURS";
-            chapterContinueBtn.innerText = "FINISH ▶";
-        } else {
-            chapterCompleteNext.innerText = `NEXT: ${CHAPTERS[currentChapter + 1].name}`;
-            chapterContinueBtn.innerText = "CONTINUE ▶";
+    function checkChapterTransition() {
+        const idx = getChapterIndex(player.radius);
+        if (idx !== currentChapter) {
+            currentChapter = idx;
+            regenerateKelp(); regenerateReef();
+            sound("level");
+            showChapterBanner(idx);
         }
-        chapterCompleteOverlay.style.display = "flex";
-    }
-
-    function continueToNextChapter() {
-        chapterCompleteOverlay.style.display = "none";
-        chapterComplete = false;
-        const isLast = currentChapter >= CHAPTERS.length - 1;
-        if (isLast) { terminateGameEngine(true); return; }
-
-        currentChapter++;
-        eatenThisChapter = 0;
-        marineThreats = []; particles = [];
-        regenerateKelp(); regenerateReef();
-        showChapterBanner(currentChapter);
-        lastTimestamp = null;
-        if (!spawnIntervalId) spawnIntervalId = setInterval(generateMarineLife, 650);
-        if (!animationFrameId) animationFrameId = requestAnimationFrame(runGameLoop);
     }
 
     function terminateGameEngine(victory) {
@@ -1314,16 +1168,31 @@ game_html += r"""
             let distance = Math.hypot(player.x - t.x, player.y - t.y);
             if (distance < player.radius + t.radius * 0.75) {
                 if (isTargetEdible) {
-                    sound("crunch"); score += Math.floor(t.radius * 12); player.radius += t.radius * 0.11;
+                    sound("crunch"); score += Math.floor(t.radius * 12);
                     spawnParticles(t.x, t.y, 150, 8);
-                    const countsForQuota = t.edible;
                     marineThreats.splice(index, 1);
+                    player.eatenThisTier++;
                     scoreLabel.innerText = "SCORE: " + String(score).padStart(5, '0');
-                    sizeLabel.innerText = `RANK: ${getRankName(player.radius)} (${Math.floor(player.radius)})`;
-                    if (countsForQuota) {
-                        eatenThisChapter++;
-                        updateChapterLabel();
-                        if (eatenThisChapter >= CHAPTERS[currentChapter].quota) { completeChapter(); ctx.restore(); return; }
+
+                    if (player.eatenThisTier >= FISH_PER_TIER) {
+                        if (player.tier < TIER_RADII.length - 1) {
+                            // Transform to the next size (small -> medium -> big -> large)
+                            player.tier++;
+                            player.eatenThisTier = 0;
+                            player.radius = TIER_RADII[player.tier];
+                            spawnParticles(player.x, player.y, 150, 20);
+                            sound("level");
+                            updateSizeHud();
+                        } else {
+                            // Finished the LARGE tier — chapter cleared.
+                            player.eatenThisTier = FISH_PER_TIER;
+                            updateSizeHud();
+                            showChapterCompleteMenu();
+                            ctx.restore();
+                            return;
+                        }
+                    } else {
+                        updateSizeHud();
                     }
                 } else { terminateGameEngine(false); }
             }
