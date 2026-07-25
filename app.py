@@ -54,6 +54,13 @@ game_html = r"""
 
         #screenOverlay { position: absolute; inset: 0; background: rgba(2, 8, 20, 0.92); display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 20; color: white; text-align: center; }
 
+        /* Chapter map label under the score, and the big banner shown when entering a new chapter */
+        #chapterLabel { position: absolute; top: 46px; left: 18px; font-size: 10px; letter-spacing: 2px; color: #7dd3c8; opacity: 0.85; pointer-events: none; z-index: 10; text-shadow: 0 0 6px #047857; }
+        #chapterBanner { position: absolute; top: 18%; left: 50%; transform: translate(-50%, -12px); z-index: 15; text-align: center; pointer-events: none; opacity: 0; transition: opacity 0.5s ease, transform 0.5s ease; }
+        #chapterBanner.show { opacity: 1; transform: translate(-50%, 0); }
+        #chapterBannerEyebrow { font-size: 11px; letter-spacing: 5px; color: #34d399; text-shadow: 0 0 10px #047857; }
+        #chapterBannerTitle { font-size: 26px; font-weight: 900; letter-spacing: 3px; color: #ffffff; text-shadow: 0 0 16px rgba(52,211,153,0.8); margin-top: 4px; }
+
         /* Pause menu — sits above the frozen game frame */
         #pauseOverlay { position: absolute; inset: 0; background: rgba(1, 8, 16, 0.78); backdrop-filter: blur(6px); display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 25; text-align: center; }
         #pauseCard { background: rgba(4, 22, 34, 0.9); border: 1px solid rgba(52, 211, 153, 0.35); border-radius: 18px; padding: 32px 30px; box-shadow: 0 18px 50px rgba(0,0,0,0.55); min-width: 260px; }
@@ -87,6 +94,12 @@ game_html += r"""
                 <div id="scoreLabel">SCORE: 00000</div>
             </div>
             <div id="sizeLabel">RANK: MINNOW (15)</div>
+        </div>
+        <div id="chapterLabel" style="display:none;">MAP 1 / 5 — CORAL SHALLOWS</div>
+
+        <div id="chapterBanner">
+            <div id="chapterBannerEyebrow">CHAPTER <span id="chapterBannerNum">1</span> OF 5</div>
+            <div id="chapterBannerTitle">CORAL SHALLOWS</div>
         </div>
 
         <div id="loadingScreen">
@@ -131,6 +144,10 @@ game_html += r"""
     const pauseBtn = document.getElementById("pauseBtn"); const pauseOverlay = document.getElementById("pauseOverlay");
     const resumeBtn = document.getElementById("resumeBtn"); const restartBtn = document.getElementById("restartBtn"); const exitBtn = document.getElementById("exitBtn");
     const overlayExitBtn = document.getElementById("overlayExitBtn");
+    const chapterLabel = document.getElementById("chapterLabel");
+    const chapterBanner = document.getElementById("chapterBanner");
+    const chapterBannerNum = document.getElementById("chapterBannerNum");
+    const chapterBannerTitle = document.getElementById("chapterBannerTitle");
 
     let score = 0, gameActive = false, gamePaused = false, timeTick = 0, lastTimestamp = null;
     let player = { x: 190, y: 240, vx: 0, vy: 0, radius: 15, targetX: 190, targetY: 240, facingLeft: false, tailWag: 0, tiltAngle: 0 };
@@ -150,15 +167,61 @@ game_html += r"""
     const TARGET_PER_SIDE = 3;
 
     // Painterly reef-fish species palettes — banded bodies + eye-mask stripe + bright fin tips, in the
-    // spirit of a real angelfish/butterflyfish rather than a single flat cartoon hue.
+    // spirit of a real angelfish/butterflyfish rather than a single flat cartoon hue. Expanded roster
+    // so each chapter/biome can draw from its own believable palette pool instead of reusing everything.
     const FISH_SPECIES = [
-        { bands: ["#eaf7ff", "#2f8fd1", "#0d3f6b"], finColor: "#ffcf4d", maskColor: "#0b1a2b" },
-        { bands: ["#fff3d6", "#f2b23c", "#7a4c0c"], finColor: "#2f8fd1", maskColor: "#241505" },
-        { bands: ["#ffe7d9", "#ff8a4d", "#96350c"], finColor: "#ffffff", maskColor: "#160a04" },
-        { bands: ["#eee9ff", "#8f7bff", "#33246e"], finColor: "#8be7ff", maskColor: "#140a2b" },
-        { bands: ["#e8fff3", "#33c48a", "#0e4a32"], finColor: "#ffe37a", maskColor: "#06231a" },
+        { bands: ["#eaf7ff", "#2f8fd1", "#0d3f6b"], finColor: "#ffcf4d", maskColor: "#0b1a2b" },   // blue tang
+        { bands: ["#fff3d6", "#f2b23c", "#7a4c0c"], finColor: "#2f8fd1", maskColor: "#241505" },   // yellow butterflyfish
+        { bands: ["#ffe7d9", "#ff8a4d", "#96350c"], finColor: "#ffffff", maskColor: "#160a04" },   // clownfish orange
+        { bands: ["#eee9ff", "#8f7bff", "#33246e"], finColor: "#8be7ff", maskColor: "#140a2b" },   // violet damsel
+        { bands: ["#e8fff3", "#33c48a", "#0e4a32"], finColor: "#ffe37a", maskColor: "#06231a" },   // parrotfish green
+        { bands: ["#f4ffe8", "#9ad14a", "#3d5c14"], finColor: "#ffb84d", maskColor: "#16240a" },   // olive wrasse (kelp)
+        { bands: ["#d9f4ff", "#4aa8c9", "#123a4a"], finColor: "#c9f2ff", maskColor: "#04141c" },   // silver-blue baitfish (rocky/open)
+        { bands: ["#2a2540", "#4b3a78", "#120f24"], finColor: "#7de8d8", maskColor: "#050414" },   // bioluminescent deep-fish (twilight/abyss)
+        { bands: ["#1c1230", "#33205c", "#0a0618"], finColor: "#ff5fb0", maskColor: "#04020a" },   // deep-sea anglerish cousin (abyss)
     ];
     const PLAYER_SPECIES = { bands: ["#eafff5", "#10b981", "#04351f"], finColor: "#facc15", maskColor: "#04120b" };
+
+    /* ---------- 5 chapter maps ----------
+       As the player grows, the game descends through 5 distinct biomes: brighter/shallower to
+       darker/deeper, each with its own water colour, light strength, coral palette, fish pool and
+       background "cast" (schooling fish, jellyfish, cruising megafauna, a landmark silhouette). */
+    const CHAPTERS = [
+        {
+            name: "CORAL SHALLOWS", minRadius: 0,
+            sky: ["#0a3a52", "#062338", "#01131f"], fog: "2, 24, 34", rayStrength: 1.15,
+            coralAmberBias: 0.5, speciesPool: [0, 1, 2, 3, 4], kelpDensity: 0.4,
+            schoolCount: 3, jellyfishCount: 0, megafauna: "turtle", megafaunaChance: 0.55, landmark: "none",
+        },
+        {
+            name: "KELP FOREST", minRadius: 23,
+            sky: ["#0a3a2e", "#062a24", "#010f14"], fog: "3, 30, 26", rayStrength: 0.95,
+            coralAmberBias: 0.3, speciesPool: [0, 4, 5, 3, 1], kelpDensity: 1.6,
+            schoolCount: 5, jellyfishCount: 1, megafauna: "turtle", megafaunaChance: 0.4, landmark: "none",
+        },
+        {
+            name: "ROCKY DROP-OFF", minRadius: 32,
+            sky: ["#0c2e4a", "#071b30", "#010a16"], fog: "3, 20, 32", rayStrength: 0.75,
+            coralAmberBias: 0.35, speciesPool: [6, 0, 3, 5, 2], kelpDensity: 0.7,
+            schoolCount: 6, jellyfishCount: 2, megafauna: "ray", megafaunaChance: 0.5, landmark: "shipwreck",
+        },
+        {
+            name: "TWILIGHT TRENCH", minRadius: 42,
+            sky: ["#141034", "#0a0a24", "#030312"], fog: "6, 10, 30", rayStrength: 0.4,
+            coralAmberBias: 0.15, speciesPool: [7, 6, 3, 8], kelpDensity: 0.25,
+            schoolCount: 4, jellyfishCount: 4, megafauna: "ray", megafaunaChance: 0.35, landmark: "shipwreck",
+        },
+        {
+            name: "ABYSSAL DEEP", minRadius: 52,
+            sky: ["#0a0620", "#050312", "#000006"], fog: "10, 4, 24", rayStrength: 0.15,
+            coralAmberBias: 0.05, speciesPool: [7, 8], kelpDensity: 0.05,
+            schoolCount: 2, jellyfishCount: 6, megafauna: "none", megafaunaChance: 0, landmark: "ruins",
+        },
+    ];
+    const WIN_RADIUS = 65;
+    let currentChapter = 0;
+    let chapterBannerTimer = 0;
+    let schoolFish = []; let jellyfish = []; let megafaunaCreature = null; let landmarkDecor = null;
 
     function resizeCanvas() {
         const rect = container.getBoundingClientRect();
@@ -170,7 +233,8 @@ game_html += r"""
     }
     function regenerateKelp() {
         kelpFronds = [];
-        const count = Math.max(4, Math.floor(canvas.width / 140));
+        const density = CHAPTERS[currentChapter] ? CHAPTERS[currentChapter].kelpDensity : 0.4;
+        const count = Math.max(2, Math.round((canvas.width / 140) * density));
         for (let i = 0; i < count; i++) {
             kelpFronds.push({ x: Math.random() * canvas.width, height: 70 + Math.random() * 110, sway: Math.random() * 12, phase: Math.random() * 100 });
         }
@@ -203,6 +267,9 @@ game_html += r"""
             });
         }
 
+        const chapterTheme = CHAPTERS[currentChapter] || CHAPTERS[0];
+        const amberBias = chapterTheme.coralAmberBias;
+
         const coralCount = Math.max(5, Math.round(w / 130));
         for (let i = 0; i < coralCount; i++) {
             const kind = Math.random();
@@ -216,7 +283,7 @@ game_html += r"""
                 tubes: Array.from({ length: 4 + Math.floor(Math.random() * 4) }, () => ({
                     dx: (Math.random() - 0.5) * height * 0.6, len: height * (0.3 + Math.random() * 0.4), wid: 5 + Math.random() * 6,
                 })),
-                hue: Math.random() < 0.5 ? "teal" : "amber",
+                hue: Math.random() < amberBias ? "amber" : "teal",
                 phase: Math.random() * 100,
             });
         }
@@ -227,9 +294,55 @@ game_html += r"""
                 x: (i + 0.5) * (w / anemoneCount) + (Math.random() - 0.5) * 90,
                 base: 14 + Math.random() * 16, lift: 10 + Math.random() * 26,
                 tentacles: 9 + Math.floor(Math.random() * 7),
-                phase: Math.random() * 100, hue: Math.random() < 0.6 ? "teal" : "amber",
+                phase: Math.random() * 100, hue: Math.random() < (1 - amberBias) ? "teal" : "amber",
             });
         }
+
+        regenerateSchoolFish(); regenerateJellyfish(); regenerateMegafauna(); regenerateLandmark();
+    }
+
+    /* ---------- Ambient background life: schooling fish, jellyfish, cruising megafauna, landmarks ----------
+       These never collide with the player — they're pure atmosphere that makes each chapter feel alive. */
+    function regenerateSchoolFish() {
+        schoolFish = [];
+        const theme = CHAPTERS[currentChapter] || CHAPTERS[0];
+        for (let s = 0; s < theme.schoolCount; s++) {
+            const memberCount = 4 + Math.floor(Math.random() * 5);
+            const originX = Math.random() * canvas.width, originY = canvas.height * (0.15 + Math.random() * 0.55);
+            const dir = Math.random() > 0.5 ? 1 : -1;
+            const speciesIdx = theme.speciesPool[Math.floor(Math.random() * theme.speciesPool.length)];
+            const members = [];
+            for (let m = 0; m < memberCount; m++) {
+                members.push({ ox: (Math.random() - 0.5) * 46, oy: (Math.random() - 0.5) * 30, phase: Math.random() * 100 });
+            }
+            schoolFish.push({ x: originX, y: originY, vx: dir * (0.25 + Math.random() * 0.25), radius: 3.5 + Math.random() * 2.5, speciesIdx, members, bobPhase: Math.random() * 100 });
+        }
+    }
+    function regenerateJellyfish() {
+        jellyfish = [];
+        const theme = CHAPTERS[currentChapter] || CHAPTERS[0];
+        for (let j = 0; j < theme.jellyfishCount; j++) {
+            jellyfish.push({
+                x: Math.random() * canvas.width, y: canvas.height * (0.1 + Math.random() * 0.75),
+                size: 14 + Math.random() * 20, phase: Math.random() * 100, driftSpeed: 0.08 + Math.random() * 0.1,
+                hue: Math.random() < 0.5 ? "180, 240, 255" : "255, 130, 220",
+            });
+        }
+    }
+    function regenerateMegafauna() {
+        const theme = CHAPTERS[currentChapter] || CHAPTERS[0];
+        if (theme.megafauna === "none" || Math.random() > theme.megafaunaChance) { megafaunaCreature = null; return; }
+        const dir = Math.random() > 0.5 ? 1 : -1;
+        megafaunaCreature = {
+            kind: theme.megafauna, x: dir > 0 ? -120 : canvas.width + 120, y: canvas.height * (0.2 + Math.random() * 0.4),
+            vx: dir * (0.18 + Math.random() * 0.1), size: theme.megafauna === "ray" ? 46 + Math.random() * 20 : 30 + Math.random() * 10,
+            phase: Math.random() * 100,
+        };
+    }
+    function regenerateLandmark() {
+        const theme = CHAPTERS[currentChapter] || CHAPTERS[0];
+        if (theme.landmark === "none") { landmarkDecor = null; return; }
+        landmarkDecor = { kind: theme.landmark, x: canvas.width * (0.55 + Math.random() * 0.35), scale: 0.85 + Math.random() * 0.4 };
     }
     window.addEventListener("resize", resizeCanvas);
     window.addEventListener("orientationchange", () => setTimeout(resizeCanvas, 250));
@@ -242,6 +355,29 @@ game_html += r"""
         else if (type === "ding") { osc.type = "sine"; osc.frequency.setValueAtTime(880, audioCtx.currentTime); osc.frequency.linearRampToValueAtTime(1200, audioCtx.currentTime + 0.06); gain.gain.setValueAtTime(0.15, audioCtx.currentTime); osc.start(); osc.stop(audioCtx.currentTime + 0.06); }
         else if (type === "boom") { osc.type = "sawtooth"; osc.frequency.setValueAtTime(90, audioCtx.currentTime); osc.frequency.exponentialRampToValueAtTime(15, audioCtx.currentTime + 0.4); gain.gain.setValueAtTime(0.6, audioCtx.currentTime); osc.start(); osc.stop(audioCtx.currentTime + 0.4); }
         else if (type === "level") { osc.type = "sine"; osc.frequency.setValueAtTime(440, audioCtx.currentTime); osc.frequency.setValueAtTime(554.37, audioCtx.currentTime + 0.08); osc.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.16); gain.gain.setValueAtTime(0.2, audioCtx.currentTime); osc.start(); osc.stop(audioCtx.currentTime + 0.35); }
+        else if (type === "crunch") {
+            // Classic "feeding frenzy" bite: a short filtered noise burst (the crunch) layered over a low thump (the weight of the bite)
+            osc.disconnect(); gain.disconnect();
+            const now = audioCtx.currentTime;
+            const bufferSize = Math.floor(audioCtx.sampleRate * 0.14);
+            const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                const decay = Math.pow(1 - i / bufferSize, 2.6);
+                data[i] = (Math.random() * 2 - 1) * decay;
+            }
+            const noise = audioCtx.createBufferSource(); noise.buffer = buffer;
+            const bandpass = audioCtx.createBiquadFilter(); bandpass.type = "bandpass"; bandpass.frequency.value = 1500 + Math.random() * 500; bandpass.Q.value = 0.7;
+            const noiseGain = audioCtx.createGain(); noiseGain.gain.setValueAtTime(0.55, now); noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.13);
+            noise.connect(bandpass); bandpass.connect(noiseGain); noiseGain.connect(audioCtx.destination);
+            noise.start(now); noise.stop(now + 0.14);
+
+            const thumpOsc = audioCtx.createOscillator(); const thumpGain = audioCtx.createGain();
+            thumpOsc.type = "sine"; thumpOsc.frequency.setValueAtTime(170, now); thumpOsc.frequency.exponentialRampToValueAtTime(48, now + 0.09);
+            thumpGain.gain.setValueAtTime(0.4, now); thumpGain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+            thumpOsc.connect(thumpGain); thumpGain.connect(audioCtx.destination);
+            thumpOsc.start(now); thumpOsc.stop(now + 0.1);
+        }
     }
 
     function updateInputCoordinates(clientX, clientY) {
@@ -301,6 +437,8 @@ game_html += r"""
         pauseOverlay.style.display = "none";
         screenOverlay.style.display = "none";
         hud.style.display = "none";
+        chapterLabel.style.display = "none";
+        chapterBanner.classList.remove("show");
         marineThreats = []; particles = []; environmentBubbles = [];
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         titleScreen.style.display = "flex";
@@ -475,6 +613,125 @@ game_html += r"""
         });
     }
 
+    /* ---------- Lightweight background schooling fish (pure atmosphere, no collision) ---------- */
+    function drawSchoolFish(dt) {
+        schoolFish.forEach(school => {
+            school.x += school.vx * dt; school.bobPhase += dt * 0.05;
+            const bob = Math.sin(school.bobPhase) * 14;
+            if (school.x > canvas.width + 80) school.x = -80; if (school.x < -80) school.x = canvas.width + 80;
+            const species = FISH_SPECIES[school.speciesIdx];
+            school.members.forEach(m => {
+                const mx = school.x + m.ox, my = school.y + m.oy + bob;
+                const wag = Math.sin(timeTick * 0.15 + m.phase) * school.radius * 0.5;
+                ctx.save();
+                ctx.globalAlpha = 0.55;
+                ctx.translate(mx, my);
+                if (school.vx < 0) ctx.scale(-1, 1);
+                ctx.fillStyle = species.bands[1];
+                ctx.beginPath();
+                ctx.moveTo(school.radius * 1.3, 0);
+                ctx.quadraticCurveTo(0, -school.radius * 0.8, -school.radius * 1.1, wag * 0.2);
+                ctx.quadraticCurveTo(0, school.radius * 0.8, school.radius * 1.3, 0);
+                ctx.closePath(); ctx.fill();
+                ctx.fillStyle = species.finColor;
+                ctx.beginPath(); ctx.moveTo(-school.radius * 1.0, 0); ctx.lineTo(-school.radius * 1.9, wag); ctx.lineTo(-school.radius * 1.0, school.radius * 0.5); ctx.closePath(); ctx.fill();
+                ctx.restore();
+            });
+        });
+    }
+
+    /* ---------- Drifting bioluminescent jellyfish ---------- */
+    function drawJellyfish(dt) {
+        jellyfish.forEach(j => {
+            j.phase += dt * j.driftSpeed;
+            j.y += Math.sin(j.phase * 0.4) * 0.12 * dt;
+            j.x += Math.cos(j.phase * 0.15) * 0.08 * dt;
+            if (j.y < -40) j.y = canvas.height + 40; if (j.y > canvas.height + 40) j.y = -40;
+            const pulse = 0.6 + Math.sin(j.phase * 2) * 0.4;
+            ctx.save();
+            ctx.translate(j.x, j.y);
+            ctx.globalCompositeOperation = "lighter";
+            let glow = ctx.createRadialGradient(0, 0, 1, 0, 0, j.size * 2.2);
+            glow.addColorStop(0, `rgba(${j.hue}, ${0.22 * pulse})`); glow.addColorStop(1, `rgba(${j.hue}, 0)`);
+            ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(0, 0, j.size * 2.2, 0, Math.PI * 2); ctx.fill();
+
+            const bellSquash = 1 + Math.sin(j.phase * 2) * 0.18;
+            ctx.fillStyle = `rgba(${j.hue}, ${0.45 * pulse})`;
+            ctx.beginPath(); ctx.ellipse(0, 0, j.size * 0.7, j.size * 0.55 * bellSquash, 0, Math.PI, 0); ctx.fill();
+            ctx.strokeStyle = `rgba(${j.hue}, ${0.3 * pulse})`; ctx.lineWidth = Math.max(1, j.size * 0.05); ctx.lineCap = "round";
+            for (let t = -3; t <= 3; t++) {
+                const sway = Math.sin(j.phase * 1.6 + t) * j.size * 0.25;
+                ctx.beginPath(); ctx.moveTo(t * j.size * 0.16, j.size * 0.05);
+                ctx.quadraticCurveTo(t * j.size * 0.16 + sway * 0.5, j.size * 0.9, t * j.size * 0.16 + sway, j.size * 1.6);
+                ctx.stroke();
+            }
+            ctx.globalCompositeOperation = "source-over";
+            ctx.restore();
+        });
+    }
+
+    /* ---------- Cruising megafauna: sea turtle or manta ray silhouettes, purely decorative ---------- */
+    function drawMegafauna(dt) {
+        if (!megafaunaCreature) return;
+        const m = megafaunaCreature;
+        m.x += m.vx * dt; m.phase += dt * 0.05;
+        m.y += Math.sin(m.phase * 2) * 0.15;
+        if (m.x > canvas.width + 140 || m.x < -140) { regenerateMegafauna(); return; }
+        ctx.save();
+        ctx.translate(m.x, m.y);
+        if (m.vx < 0) ctx.scale(-1, 1);
+        ctx.globalAlpha = 0.5;
+        if (m.kind === "ray") {
+            const flap = Math.sin(m.phase * 4) * m.size * 0.28;
+            ctx.fillStyle = "#2b3a4a";
+            ctx.beginPath();
+            ctx.moveTo(m.size * 1.1, 0);
+            ctx.quadraticCurveTo(m.size * 0.3, -m.size * 0.5 + flap, -m.size * 0.9, -m.size * 0.15);
+            ctx.quadraticCurveTo(-m.size * 0.4, 0, -m.size * 0.9, m.size * 0.15);
+            ctx.quadraticCurveTo(m.size * 0.3, m.size * 0.5 - flap, m.size * 1.1, 0);
+            ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = "rgba(148,163,184,0.4)"; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(-m.size * 0.85, 0); ctx.lineTo(-m.size * 1.6, m.size * 0.35); ctx.stroke();
+        } else if (m.kind === "turtle") {
+            const paddle = Math.sin(m.phase * 3) * 0.35;
+            ctx.fillStyle = "#3a5a3f";
+            ctx.beginPath(); ctx.ellipse(0, 0, m.size * 0.62, m.size * 0.46, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = "rgba(6,20,10,0.4)"; ctx.lineWidth = 1.4;
+            for (let i = -1; i <= 1; i++) { ctx.beginPath(); ctx.moveTo(i * m.size * 0.24, -m.size * 0.4); ctx.lineTo(i * m.size * 0.24, m.size * 0.4); ctx.stroke(); }
+            ctx.beginPath(); ctx.ellipse(m.size * 0.72, 0, m.size * 0.2, m.size * 0.14, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.save(); ctx.rotate(paddle * 0.5);
+            ctx.beginPath(); ctx.ellipse(-m.size * 0.1, -m.size * 0.55, m.size * 0.32, m.size * 0.14, 0.4, 0, Math.PI * 2); ctx.fill();
+            ctx.restore();
+            ctx.save(); ctx.rotate(-paddle * 0.5);
+            ctx.beginPath(); ctx.ellipse(-m.size * 0.1, m.size * 0.55, m.size * 0.32, m.size * 0.14, -0.4, 0, Math.PI * 2); ctx.fill();
+            ctx.restore();
+        }
+        ctx.restore();
+    }
+
+    /* ---------- Landmark silhouettes: a shipwreck for mid-depth chapters, ruins for the abyss ---------- */
+    function drawLandmark() {
+        if (!landmarkDecor) return;
+        const floorY = canvas.height + 4; const s = landmarkDecor.scale;
+        ctx.save(); ctx.translate(landmarkDecor.x, floorY); ctx.scale(s, s); ctx.globalAlpha = 0.5;
+        ctx.fillStyle = "#0b1520";
+        if (landmarkDecor.kind === "shipwreck") {
+            ctx.beginPath();
+            ctx.moveTo(-140, 0); ctx.lineTo(120, 0); ctx.lineTo(90, -46); ctx.lineTo(-40, -58); ctx.lineTo(-120, -34); ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = "rgba(148,163,184,0.25)"; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(-10, -58); ctx.lineTo(-10, -140); ctx.moveTo(-10, -110); ctx.lineTo(46, -96); ctx.stroke();
+            for (let i = -100; i < 100; i += 26) { ctx.beginPath(); ctx.moveTo(i, -6); ctx.lineTo(i + 14, -34); ctx.stroke(); }
+        } else if (landmarkDecor.kind === "ruins") {
+            for (let i = 0; i < 3; i++) {
+                const px = -110 + i * 110;
+                ctx.fillRect(px - 12, -90, 24, 90);
+                ctx.beginPath(); ctx.ellipse(px, -90, 18, 8, 0, 0, Math.PI * 2); ctx.fill();
+            }
+            ctx.beginPath(); ctx.moveTo(-130, -84); ctx.lineTo(130, -84); ctx.lineTo(110, -100); ctx.lineTo(-110, -100); ctx.closePath(); ctx.fill();
+        }
+        ctx.restore();
+    }
+
     function drawAura(r, colorRgb, strong) {
         const outer = strong ? r * 1.5 : r * 1.3;
         const peakAlpha = strong ? 0.4 : 0.22;
@@ -632,6 +889,18 @@ game_html += r"""
         spec2.addColorStop(0, "rgba(255,255,255,0.6)"); spec2.addColorStop(1, "rgba(255,255,255,0)");
         ctx.fillStyle = spec2; ctx.beginPath(); ctx.ellipse(r * 0.86, -r * 0.1, r * 0.24, r * 0.16, 0, 0, Math.PI * 2); ctx.fill();
 
+        // wet scale sparkle — a couple of tiny twinkling glints that drift across the flank as it swims
+        ctx.globalCompositeOperation = "lighter";
+        for (let sp = 0; sp < 3; sp++) {
+            const twinkle = 0.4 + 0.6 * Math.max(0, Math.sin(pulseTick * 0.18 + sp * 2.4));
+            if (twinkle < 0.55) continue;
+            const spx = r * (-0.35 + sp * 0.42) + Math.sin(pulseTick * 0.05 + sp) * r * 0.06;
+            const spy = -r * 0.15 + Math.cos(pulseTick * 0.07 + sp * 1.3) * r * 0.35;
+            ctx.fillStyle = `rgba(255,255,255,${0.5 * twinkle})`;
+            ctx.beginPath(); ctx.arc(spx, spy, Math.max(0.6, r * 0.045), 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.globalCompositeOperation = "source-over";
+
         ctx.restore(); // drop clip
 
         // silhouette edge: dark outline + top rim highlight so the shape reads clearly underwater
@@ -682,8 +951,11 @@ game_html += r"""
         setupAudio(); score = 0; gameActive = true; gamePaused = false; player.radius = 15;
         player.x = canvas.width / 2; player.y = canvas.height / 2; player.targetX = player.x; player.targetY = player.y; player.vx = 0; player.vy = 0;
         marineThreats = []; environmentBubbles = []; particles = []; screenShake = 0; lastTimestamp = null;
+        currentChapter = 0; regenerateKelp(); regenerateReef();
         screenOverlay.style.display = "none"; pauseOverlay.style.display = "none"; titleScreen.style.display = "none"; hud.style.display = "flex";
+        chapterLabel.style.display = "block";
         scoreLabel.innerText = "SCORE: 00000"; sizeLabel.innerText = "RANK: MINNOW (15)";
+        showChapterBanner(0);
         if (spawnIntervalId) clearInterval(spawnIntervalId); spawnIntervalId = setInterval(generateMarineLife, 650);
         if (animationFrameId) cancelAnimationFrame(animationFrameId); animationFrameId = requestAnimationFrame(runGameLoop);
     }
@@ -700,7 +972,8 @@ game_html += r"""
         const makeEdible = needEdible && (!needInedible || Math.random() < 0.5);
 
         const spawnFromLeft = Math.random() > 0.5;
-        const speciesIdx = Math.floor(Math.random() * FISH_SPECIES.length);
+        const pool = (CHAPTERS[currentChapter] || CHAPTERS[0]).speciesPool;
+        const speciesIdx = pool[Math.floor(Math.random() * pool.length)];
         const specificType = Math.floor(Math.random() * 3) + 1;
         const sizeRadius = makeEdible ? Math.max(6, player.radius - (Math.random() * 12 + 5)) : player.radius + (Math.random() * 16 + 6);
         const baseY = Math.random() * (canvas.height - 90) + 45;
@@ -708,13 +981,35 @@ game_html += r"""
         marineThreats.push({ x: spawnFromLeft ? -60 : canvas.width + 60, y: baseY, radius: sizeRadius, vx: baseSpeed, vy: 0, fishType: specificType, speciesIdx, wagPhase: Math.random() * 100 });
     }
 
-    function getRankName(r) { if (r < 25) return "MINNOW"; if (r < 40) return "BASS"; if (r < 55) return "TUNA"; return "APEX SHARK"; }
+    function getRankName(r) { if (r < 23) return "MINNOW"; if (r < 32) return "BASS"; if (r < 42) return "TUNA"; if (r < 52) return "BARRACUDA"; return "APEX SHARK"; }
+
+    function getChapterIndex(r) {
+        let idx = 0;
+        for (let i = 0; i < CHAPTERS.length; i++) { if (r >= CHAPTERS[i].minRadius) idx = i; }
+        return idx;
+    }
+    function showChapterBanner(idx) {
+        chapterBannerNum.innerText = String(idx + 1);
+        chapterBannerTitle.innerText = CHAPTERS[idx].name;
+        chapterLabel.innerText = `MAP ${idx + 1} / ${CHAPTERS.length} — ${CHAPTERS[idx].name}`;
+        chapterBanner.classList.add("show");
+        chapterBannerTimer = 150;
+    }
+    function checkChapterTransition() {
+        const idx = getChapterIndex(player.radius);
+        if (idx !== currentChapter) {
+            currentChapter = idx;
+            regenerateKelp(); regenerateReef();
+            sound("level");
+            showChapterBanner(idx);
+        }
+    }
 
     function terminateGameEngine(victory) {
         gameActive = false; gamePaused = false; clearInterval(spawnIntervalId); spawnIntervalId = null; cancelAnimationFrame(animationFrameId); animationFrameId = null;
         pauseOverlay.style.display = "none"; screenOverlay.style.display = "flex";
-        if (victory) { sound("level"); overlayTitle.innerText = "👑 APEX OCEAN GOD 👑"; overlayTitle.style.color = "#eab308"; overlaySub.innerText = `Evolution completed safely! Final Score: ${score}`; actionBtn.innerText = "RESTART EVOLUTION 🔄"; }
-        else { sound("boom"); screenShake = 14; overlayTitle.innerText = "🐋 CONSUMED 🐋"; overlayTitle.style.color = "#ef4444"; overlaySub.innerText = `You became organic mass. Final Score: ${score}`; actionBtn.innerText = "REDEPLOY DESCENT 🔄"; }
+        if (victory) { sound("level"); overlayTitle.innerText = "👑 APEX OCEAN GOD 👑"; overlayTitle.style.color = "#eab308"; overlaySub.innerText = `Evolution completed safely across all 5 chapters! Final Score: ${score}`; actionBtn.innerText = "RESTART EVOLUTION 🔄"; }
+        else { sound("boom"); screenShake = 14; overlayTitle.innerText = "🐋 CONSUMED 🐋"; overlayTitle.style.color = "#ef4444"; overlaySub.innerText = `You became organic mass in ${CHAPTERS[currentChapter].name}. Final Score: ${score}`; actionBtn.innerText = "REDEPLOY DESCENT 🔄"; }
     }
 
     function runGameLoop(timestamp) {
@@ -728,18 +1023,24 @@ game_html += r"""
         ctx.save();
         if (screenShake > 0) { ctx.translate((Math.random() - 0.5) * screenShake, (Math.random() - 0.5) * screenShake); screenShake *= 0.9; if (screenShake < 0.3) screenShake = 0; }
 
-        let oceanBackground = ctx.createLinearGradient(0, 0, 0, canvas.height); oceanBackground.addColorStop(0, "#041628"); oceanBackground.addColorStop(0.5, "#020f1c"); oceanBackground.addColorStop(1, "#01050d"); ctx.fillStyle = oceanBackground; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        const theme = CHAPTERS[currentChapter] || CHAPTERS[0];
+        let oceanBackground = ctx.createLinearGradient(0, 0, 0, canvas.height); oceanBackground.addColorStop(0, theme.sky[0]); oceanBackground.addColorStop(0.5, theme.sky[1]); oceanBackground.addColorStop(1, theme.sky[2]); ctx.fillStyle = oceanBackground; ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        const causticPulse = 0.015 + Math.sin(timeTick * 0.02) * 0.008;
+        const causticPulse = (0.015 + Math.sin(timeTick * 0.02) * 0.008) * theme.rayStrength;
         const midX = canvas.width / 2;
         // Volumetric god-rays replace the old hard caustic wedges (same centre-line drift variables)
         drawVolumetricLight(causticPulse);
         void midX;
 
+        // Distant background cast (megafauna + far schools) drawn before the reef so foreground reads on top
+        drawMegafauna(dt);
+        drawSchoolFish(dt);
+
         // Reef silhouettes sit behind the kelp; depth fog pushes them back into the dark water
         drawCoralReef();
+        drawLandmark();
         let depthFog = ctx.createLinearGradient(0, canvas.height * 0.55, 0, canvas.height);
-        depthFog.addColorStop(0, "rgba(2, 12, 22, 0)"); depthFog.addColorStop(1, "rgba(2, 12, 22, 0.55)");
+        depthFog.addColorStop(0, `rgba(${theme.fog}, 0)`); depthFog.addColorStop(1, `rgba(${theme.fog}, 0.55)`);
         ctx.fillStyle = depthFog; ctx.fillRect(0, canvas.height * 0.55, canvas.width, canvas.height * 0.45);
 
         kelpFronds.forEach(k => {
@@ -749,6 +1050,9 @@ game_html += r"""
         });
 
         drawAnemones();
+        drawJellyfish(dt);
+
+        if (chapterBannerTimer > 0) { chapterBannerTimer -= dt; if (chapterBannerTimer <= 0) chapterBanner.classList.remove("show"); }
 
         if (Math.random() < 0.06 * dt) environmentBubbles.push({ x: Math.random() * canvas.width, y: canvas.height + 20, r: Math.random() * 2.5 + 1, speed: Math.random() * 0.8 + 0.4, drift: (Math.random() - 0.5) * 0.4 });
         environmentBubbles.forEach((b, i) => { b.y -= b.speed * dt; b.x += b.drift * dt; ctx.fillStyle = "rgba(52, 211, 153, 0.12)"; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); if (b.y < -10) environmentBubbles.splice(i, 1); });
@@ -788,12 +1092,13 @@ game_html += r"""
             let distance = Math.hypot(player.x - t.x, player.y - t.y);
             if (distance < player.radius + t.radius * 0.75) {
                 if (isTargetEdible) {
-                    sound("ding"); score += Math.floor(t.radius * 12); player.radius += t.radius * 0.11;
+                    sound("crunch"); score += Math.floor(t.radius * 12); player.radius += t.radius * 0.11;
                     spawnParticles(t.x, t.y, 150, 8);
                     marineThreats.splice(index, 1);
                     scoreLabel.innerText = "SCORE: " + String(score).padStart(5, '0');
                     sizeLabel.innerText = `RANK: ${getRankName(player.radius)} (${Math.floor(player.radius)})`;
-                    if (player.radius >= 55) terminateGameEngine(true);
+                    checkChapterTransition();
+                    if (player.radius >= WIN_RADIUS) terminateGameEngine(true);
                 } else { terminateGameEngine(false); }
             }
             if ((t.x > canvas.width + 60 && t.vx > 0) || (t.x < -60 && t.vx < 0)) marineThreats.splice(index, 1);
