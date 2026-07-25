@@ -135,6 +135,15 @@ game_html += r"""
     let score = 0, gameActive = false, gamePaused = false, timeTick = 0, lastTimestamp = null;
     let player = { x: 190, y: 240, vx: 0, vy: 0, radius: 15, targetX: 190, targetY: 240, facingLeft: false, tailWag: 0, tiltAngle: 0 };
     let marineThreats = []; let environmentBubbles = []; let particles = []; let kelpFronds = [];
+    let reefRocks = []; let reefCorals = []; let reefAnemones = [];
+    // Volumetric god-ray definitions (offset from centre, width, drift speed, base alpha)
+    const LIGHT_RAYS = [
+        { o: -0.34, w: 0.085, s: 0.0055, a: 0.16 },
+        { o: -0.16, w: 0.130, s: 0.0038, a: 0.12 },
+        { o:  0.02, w: 0.060, s: 0.0072, a: 0.20 },
+        { o:  0.19, w: 0.115, s: 0.0045, a: 0.11 },
+        { o:  0.36, w: 0.075, s: 0.0062, a: 0.15 },
+    ];
     let animationFrameId = null, spawnIntervalId = null, audioCtx = null;
     let screenShake = 0;
     const MAX_FISH_ON_SCREEN = 8;
@@ -157,12 +166,69 @@ game_html += r"""
         player.x = Math.min(player.x, canvas.width - 15); player.y = Math.min(player.y, canvas.height - 15);
         player.targetX = player.x; player.targetY = player.y;
         regenerateKelp();
+        regenerateReef();
     }
     function regenerateKelp() {
         kelpFronds = [];
         const count = Math.max(4, Math.floor(canvas.width / 140));
         for (let i = 0; i < count; i++) {
             kelpFronds.push({ x: Math.random() * canvas.width, height: 70 + Math.random() * 110, sway: Math.random() * 12, phase: Math.random() * 100 });
+        }
+    }
+
+    /* ---------- Procedural coral reef: rocks, branching/fan/tube corals, glowing anemones ----------
+       Geometry is baked once per resize so the reef never flickers and the per-frame cost is just strokes. */
+    function makeCoralBranches(height, spread) {
+        const segs = [];
+        (function grow(x, y, ang, len, wid, depth) {
+            const nx = x + Math.cos(ang) * len, ny = y + Math.sin(ang) * len;
+            segs.push({ x1: x, y1: y, x2: nx, y2: ny, w: Math.max(1.2, wid), tip: depth === 0 });
+            if (depth <= 0) return;
+            grow(nx, ny, ang - spread * (0.55 + Math.random() * 0.6), len * 0.74, wid * 0.66, depth - 1);
+            grow(nx, ny, ang + spread * (0.55 + Math.random() * 0.6), len * 0.74, wid * 0.66, depth - 1);
+            if (Math.random() < 0.4) grow(nx, ny, ang + (Math.random() - 0.5) * spread * 0.5, len * 0.6, wid * 0.5, depth - 1);
+        })(0, 0, -Math.PI / 2, height * 0.4, height * 0.14, 3);
+        return segs;
+    }
+    function regenerateReef() {
+        const w = canvas.width, h = canvas.height;
+        reefRocks = []; reefCorals = []; reefAnemones = [];
+
+        const rockCount = Math.max(3, Math.round(w / 240));
+        for (let i = 0; i < rockCount; i++) {
+            reefRocks.push({
+                x: (i + 0.5) * (w / rockCount) + (Math.random() - 0.5) * (w / rockCount) * 0.6,
+                rw: 70 + Math.random() * 130, rh: 26 + Math.random() * 58,
+                depth: Math.random(), bumps: 2 + Math.floor(Math.random() * 3),
+            });
+        }
+
+        const coralCount = Math.max(5, Math.round(w / 130));
+        for (let i = 0; i < coralCount; i++) {
+            const kind = Math.random();
+            const height = 44 + Math.random() * 82;
+            reefCorals.push({
+                x: Math.random() * w,
+                height,
+                depth: 0.35 + Math.random() * 0.65,             // 1 = foreground, small = hazier/further
+                kind: kind < 0.45 ? "branch" : (kind < 0.75 ? "fan" : "tube"),
+                segs: kind < 0.45 ? makeCoralBranches(height, 0.55 + Math.random() * 0.3) : null,
+                tubes: Array.from({ length: 4 + Math.floor(Math.random() * 4) }, () => ({
+                    dx: (Math.random() - 0.5) * height * 0.6, len: height * (0.3 + Math.random() * 0.4), wid: 5 + Math.random() * 6,
+                })),
+                hue: Math.random() < 0.5 ? "teal" : "amber",
+                phase: Math.random() * 100,
+            });
+        }
+
+        const anemoneCount = Math.max(2, Math.round(w / 320));
+        for (let i = 0; i < anemoneCount; i++) {
+            reefAnemones.push({
+                x: (i + 0.5) * (w / anemoneCount) + (Math.random() - 0.5) * 90,
+                base: 14 + Math.random() * 16, lift: 10 + Math.random() * 26,
+                tentacles: 9 + Math.floor(Math.random() * 7),
+                phase: Math.random() * 100, hue: Math.random() < 0.6 ? "teal" : "amber",
+            });
         }
     }
     window.addEventListener("resize", resizeCanvas);
@@ -257,6 +323,158 @@ game_html += r"""
 """
 # Part D: True fish-silhouette rendering — tapered body with snout + peduncle, scales, gills, pectoral fin
 game_html += r"""
+    /* ---------- Volumetric lighting: soft god-rays fading into dark water ---------- */
+    function drawVolumetricLight(pulse) {
+        const h = canvas.height, w = canvas.width;
+        // surface shimmer band
+        let surf = ctx.createLinearGradient(0, 0, 0, h * 0.3);
+        surf.addColorStop(0, `rgba(150, 231, 233, ${0.14 + pulse * 2})`);
+        surf.addColorStop(1, "rgba(6, 40, 60, 0)");
+        ctx.fillStyle = surf; ctx.fillRect(0, 0, w, h * 0.3);
+
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        const canBlur = typeof ctx.filter === "string";
+        if (canBlur) ctx.filter = "blur(15px)";
+        LIGHT_RAYS.forEach((ray, i) => {
+            const topX = w * (0.5 + ray.o) + Math.sin(timeTick * ray.s + i * 1.7) * w * 0.035;
+            const rw = w * ray.w;
+            const skew = w * 0.09 + Math.sin(timeTick * ray.s * 1.6 + i) * w * 0.025;
+            const alpha = ray.a + pulse * 1.2;
+            let g = ctx.createLinearGradient(0, 0, 0, h * 0.95);
+            g.addColorStop(0, `rgba(196, 244, 245, ${alpha})`);
+            g.addColorStop(0.35, `rgba(94, 214, 199, ${alpha * 0.45})`);
+            g.addColorStop(0.72, `rgba(30, 140, 150, ${alpha * 0.16})`);
+            g.addColorStop(1, "rgba(10, 60, 80, 0)");
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.moveTo(topX - rw * 0.5, -20); ctx.lineTo(topX + rw * 0.5, -20);
+            ctx.lineTo(topX + skew + rw * 1.15, h * 0.98); ctx.lineTo(topX + skew - rw * 0.35, h * 0.98);
+            ctx.closePath(); ctx.fill();
+        });
+        if (canBlur) ctx.filter = "none";
+        ctx.restore();
+    }
+
+    /* ---------- Reef floor: sediment mound, layered rock and coral silhouettes ---------- */
+    function reefTint(kind, lightness) {
+        if (kind === "amber") return `rgba(${Math.round(150 * lightness + 40)}, ${Math.round(96 * lightness + 30)}, ${Math.round(38 * lightness + 18)}, 1)`;
+        return `rgba(${Math.round(24 * lightness + 6)}, ${Math.round(120 * lightness + 26)}, ${Math.round(112 * lightness + 34)}, 1)`;
+    }
+    function drawCoralReef() {
+        const w = canvas.width, h = canvas.height;
+        const floorY = h + 6;
+
+        // sediment bed
+        let bed = ctx.createLinearGradient(0, h - 120, 0, h);
+        bed.addColorStop(0, "rgba(3, 24, 34, 0)"); bed.addColorStop(1, "rgba(4, 30, 38, 0.85)");
+        ctx.fillStyle = bed; ctx.fillRect(0, h - 120, w, 120);
+
+        // rock mounds, hazier the further back they sit
+        reefRocks.forEach(rk => {
+            const fade = 0.3 + rk.depth * 0.45;
+            ctx.fillStyle = `rgba(4, ${Math.round(26 + rk.depth * 18)}, ${Math.round(34 + rk.depth * 20)}, ${fade})`;
+            ctx.beginPath(); ctx.moveTo(rk.x - rk.rw, floorY);
+            for (let b = 0; b <= rk.bumps; b++) {
+                const t0 = b / rk.bumps, t1 = (b + 0.5) / rk.bumps, t2 = (b + 1) / rk.bumps;
+                ctx.quadraticCurveTo(
+                    rk.x - rk.rw + rk.rw * 2 * t1, floorY - rk.rh * (0.7 + ((b % 2) ? 0.45 : 0.15)),
+                    rk.x - rk.rw + rk.rw * 2 * Math.min(1, t2), floorY - rk.rh * (b === rk.bumps ? 0 : 0.5)
+                );
+                void t0;
+            }
+            ctx.lineTo(rk.x + rk.rw, floorY); ctx.closePath(); ctx.fill();
+        });
+
+        // corals
+        reefCorals.forEach(c => {
+            const sway = Math.sin(timeTick * 0.012 + c.phase) * (3 + c.height * 0.03);
+            ctx.save();
+            ctx.translate(c.x, floorY);
+            ctx.globalAlpha = 0.35 + c.depth * 0.5;
+            const body = reefTint(c.hue, 0.35 + c.depth * 0.4);
+
+            if (c.kind === "branch") {
+                ctx.strokeStyle = body; ctx.lineCap = "round";
+                c.segs.forEach(s => {
+                    ctx.lineWidth = s.w * (0.6 + c.depth * 0.5);
+                    ctx.beginPath();
+                    ctx.moveTo(s.x1 + sway * (-s.y1 / c.height) * 0.5, s.y1);
+                    ctx.lineTo(s.x2 + sway * (-s.y2 / c.height) * 0.6, s.y2);
+                    ctx.stroke();
+                });
+                // luminous polyp tips
+                ctx.fillStyle = c.hue === "amber" ? "rgba(250, 204, 21, 0.5)" : "rgba(52, 211, 153, 0.5)";
+                c.segs.filter(s => s.tip).forEach(s => {
+                    ctx.beginPath(); ctx.arc(s.x2 + sway * (-s.y2 / c.height) * 0.6, s.y2, Math.max(1.2, s.w * 0.7), 0, Math.PI * 2); ctx.fill();
+                });
+            } else if (c.kind === "fan") {
+                // wide, flat sea fan (broader than tall) rather than a balloon shape
+                const fh = c.height * 0.8, fw = c.height * 1.15;
+                let fg = ctx.createLinearGradient(0, 0, 0, -fh);
+                fg.addColorStop(0, body); fg.addColorStop(1, c.hue === "amber" ? "rgba(150, 92, 34, 0.16)" : "rgba(38, 160, 145, 0.16)");
+                ctx.fillStyle = fg; ctx.globalAlpha *= 0.7;
+                ctx.beginPath(); ctx.moveTo(0, 0);
+                ctx.quadraticCurveTo(-fw * 0.55 + sway * 0.6, -fh * 0.35, -fw * 0.5 + sway, -fh * 0.92);
+                ctx.quadraticCurveTo(0 + sway, -fh * 1.05, fw * 0.5 + sway, -fh * 0.92);
+                ctx.quadraticCurveTo(fw * 0.55 + sway * 0.6, -fh * 0.35, 0, 0);
+                ctx.closePath(); ctx.fill();
+                // fan lattice ribs
+                ctx.strokeStyle = c.hue === "amber" ? "rgba(250, 204, 21, 0.16)" : "rgba(190, 245, 240, 0.16)"; ctx.lineWidth = 1;
+                for (let i = -4; i <= 4; i++) {
+                    ctx.beginPath(); ctx.moveTo(0, 0);
+                    ctx.quadraticCurveTo(i * fw * 0.09 + sway * 0.5, -fh * 0.5, i * fw * 0.115 + sway, -fh * 0.9); ctx.stroke();
+                }
+            } else {
+                ctx.strokeStyle = body; ctx.lineCap = "round";
+                c.tubes.forEach((t, i) => {
+                    ctx.lineWidth = t.wid * (0.6 + c.depth * 0.5);
+                    const lean = t.dx * 0.35;
+                    ctx.beginPath(); ctx.moveTo(t.dx, 0);
+                    ctx.quadraticCurveTo(t.dx + lean * 0.5 + sway * 0.4, -t.len * 0.65, t.dx + lean + sway, -t.len); ctx.stroke();
+                    ctx.fillStyle = c.hue === "amber" ? "rgba(250, 204, 21, 0.28)" : "rgba(52, 211, 153, 0.28)";
+                    ctx.beginPath(); ctx.ellipse(t.dx + lean + sway, -t.len, t.wid * 0.6, t.wid * 0.35, 0, 0, Math.PI * 2); ctx.fill();
+                    void i;
+                });
+            }
+            ctx.restore();
+        });
+    }
+
+    /* ---------- Glowing sea anemones (front layer, additive bloom) ---------- */
+    function drawAnemones() {
+        const floorY = canvas.height + 4;
+        reefAnemones.forEach(a => {
+            const rgb = a.hue === "amber" ? "250, 204, 21" : "52, 211, 153";
+            const pulse = 0.55 + Math.sin(timeTick * 0.03 + a.phase) * 0.25;
+            ctx.save();
+            ctx.translate(a.x, floorY - a.lift);
+            ctx.globalCompositeOperation = "lighter";
+            let glow = ctx.createRadialGradient(0, 0, 1, 0, 0, a.base * 2.4);
+            glow.addColorStop(0, `rgba(${rgb}, ${0.16 * pulse})`); glow.addColorStop(1, `rgba(${rgb}, 0)`);
+            ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(0, 0, a.base * 2.4, 0, Math.PI * 2); ctx.fill();
+
+            // soft curling tentacles — short, rounded and splayed outward, not a starburst
+            ctx.lineCap = "round";
+            for (let i = 0; i < a.tentacles; i++) {
+                const spread = (i / (a.tentacles - 1) - 0.5) * Math.PI * 0.9;
+                const wave = Math.sin(timeTick * 0.04 + a.phase + i * 0.7) * a.base * 0.22;
+                const ex = Math.sin(spread) * a.base * 1.05 + wave;
+                const ey = -a.base * (0.35 + Math.cos(spread) * 0.45);
+                ctx.strokeStyle = `rgba(${rgb}, ${0.3 * pulse})`; ctx.lineWidth = Math.max(1.6, a.base * 0.14);
+                ctx.beginPath(); ctx.moveTo(0, a.lift * 0.35);
+                ctx.quadraticCurveTo(ex * 0.45, ey * 1.15, ex, ey);
+                ctx.stroke();
+                ctx.fillStyle = `rgba(${rgb}, ${0.34 * pulse})`;
+                ctx.beginPath(); ctx.arc(ex, ey, Math.max(1.1, a.base * 0.1), 0, Math.PI * 2); ctx.fill();
+            }
+            ctx.globalCompositeOperation = "source-over";
+            ctx.fillStyle = `rgba(4, 30, 38, 0.9)`; ctx.beginPath();
+            ctx.ellipse(0, a.lift * 0.5, a.base * 0.55, a.base * 0.4, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.restore();
+        });
+    }
+
     function drawAura(r, colorRgb, strong) {
         const outer = strong ? r * 1.5 : r * 1.3;
         const peakAlpha = strong ? 0.4 : 0.22;
@@ -356,13 +574,17 @@ game_html += r"""
         pedGrd.addColorStop(0, "rgba(0,0,0,0)"); pedGrd.addColorStop(1, "rgba(2,6,14,0.45)");
         ctx.fillStyle = pedGrd; ctx.fillRect(-r * 1.3, -r * 1.3, r * 1.3, r * 2.6);
 
-        // scale rows — small overlapping arcs, denser near the middle of the flank
-        ctx.strokeStyle = "rgba(255,255,255,0.16)"; ctx.lineWidth = Math.max(0.5, r * 0.028);
+        // scale rows — embossed overlapping arcs (dark crease + light catch) for a real scaled texture
         const scaleStep = Math.max(3.2, r * 0.24);
-        for (let sy = -r * 0.85; sy < r * 0.85; sy += scaleStep) {
-            for (let sx = -r * 0.85; sx < r * 0.95; sx += scaleStep) {
-                const off = (Math.round((sy + r) / scaleStep) % 2) * scaleStep * 0.5;
-                ctx.beginPath(); ctx.arc(sx + off, sy, scaleStep * 0.52, Math.PI * 0.15, Math.PI * 0.85); ctx.stroke();
+        ctx.lineWidth = Math.max(0.5, r * 0.028);
+        for (let pass = 0; pass < 2; pass++) {
+            ctx.strokeStyle = pass === 0 ? "rgba(2,8,18,0.22)" : "rgba(255,255,255,0.22)";
+            const shift = pass === 0 ? scaleStep * 0.12 : 0;
+            for (let sy = -r * 0.9; sy < r * 0.9; sy += scaleStep) {
+                for (let sx = -r * 0.9; sx < r * 1.0; sx += scaleStep) {
+                    const off = (Math.round((sy + r) / scaleStep) % 2) * scaleStep * 0.5;
+                    ctx.beginPath(); ctx.arc(sx + off, sy + shift, scaleStep * 0.52, Math.PI * 0.15, Math.PI * 0.85); ctx.stroke();
+                }
             }
         }
         // lateral line
@@ -386,6 +608,29 @@ game_html += r"""
         let bellyGrd = ctx.createLinearGradient(0, r * 0.2, 0, r * 1.0);
         bellyGrd.addColorStop(0, "rgba(255,255,255,0)"); bellyGrd.addColorStop(1, "rgba(255,255,255,0.34)");
         ctx.fillStyle = bellyGrd; ctx.fillRect(-r * 1.3, 0, r * 2.7, r * 1.3);
+
+        // ---- premium 3D pass: layered radial sheens + specular hotspots ----
+        ctx.globalCompositeOperation = "screen";
+        // broad wet sheen wrapping the upper flank
+        let sheen = ctx.createRadialGradient(r * 0.34, -r * 0.5, r * 0.04, r * 0.05, -r * 0.05, r * 1.3);
+        sheen.addColorStop(0, "rgba(226, 250, 255, 0.5)");
+        sheen.addColorStop(0.34, "rgba(140, 210, 235, 0.18)");
+        sheen.addColorStop(1, "rgba(120, 190, 220, 0)");
+        ctx.fillStyle = sheen; ctx.fillRect(-r * 1.3, -r * 1.3, r * 2.7, r * 2.6);
+        // secondary iridescent bounce light from the water below
+        let bounce = ctx.createRadialGradient(-r * 0.25, r * 0.6, r * 0.03, -r * 0.2, r * 0.55, r * 1.0);
+        bounce.addColorStop(0, "rgba(94, 234, 212, 0.28)");
+        bounce.addColorStop(1, "rgba(94, 234, 212, 0)");
+        ctx.fillStyle = bounce; ctx.fillRect(-r * 1.3, -r * 1.3, r * 2.7, r * 2.6);
+        ctx.globalCompositeOperation = "source-over";
+
+        // tight specular hotspot (the glossy 3D "kick") plus a smaller snout highlight
+        let spec = ctx.createRadialGradient(r * 0.4, -r * 0.44, 0, r * 0.4, -r * 0.44, r * 0.52);
+        spec.addColorStop(0, "rgba(255,255,255,0.9)"); spec.addColorStop(0.45, "rgba(255,255,255,0.22)"); spec.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.fillStyle = spec; ctx.beginPath(); ctx.ellipse(r * 0.4, -r * 0.42, r * 0.5, r * 0.26, -0.35, 0, Math.PI * 2); ctx.fill();
+        let spec2 = ctx.createRadialGradient(r * 0.86, -r * 0.1, 0, r * 0.86, -r * 0.1, r * 0.26);
+        spec2.addColorStop(0, "rgba(255,255,255,0.6)"); spec2.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.fillStyle = spec2; ctx.beginPath(); ctx.ellipse(r * 0.86, -r * 0.1, r * 0.24, r * 0.16, 0, 0, Math.PI * 2); ctx.fill();
 
         ctx.restore(); // drop clip
 
@@ -487,15 +732,23 @@ game_html += r"""
 
         const causticPulse = 0.015 + Math.sin(timeTick * 0.02) * 0.008;
         const midX = canvas.width / 2;
-        ctx.fillStyle = `rgba(16, 185, 129, ${causticPulse})`; ctx.beginPath(); ctx.moveTo(midX - 130, 0); ctx.lineTo(midX, canvas.height); ctx.lineTo(midX - 80, canvas.height); ctx.lineTo(midX - 170, 0); ctx.closePath(); ctx.fill();
-        ctx.beginPath(); ctx.moveTo(midX + 30, 0); ctx.lineTo(midX + 150, canvas.height); ctx.lineTo(midX + 70, canvas.height); ctx.lineTo(midX - 20, 0); ctx.closePath(); ctx.fill();
-        ctx.fillStyle = `rgba(52, 211, 153, ${causticPulse * 0.7})`; ctx.beginPath(); ctx.moveTo(midX - 40 + Math.sin(timeTick * 0.01) * 20, 0); ctx.lineTo(midX + 40, canvas.height); ctx.lineTo(midX, canvas.height); ctx.lineTo(midX - 100 + Math.sin(timeTick * 0.01) * 20, 0); ctx.closePath(); ctx.fill();
+        // Volumetric god-rays replace the old hard caustic wedges (same centre-line drift variables)
+        drawVolumetricLight(causticPulse);
+        void midX;
+
+        // Reef silhouettes sit behind the kelp; depth fog pushes them back into the dark water
+        drawCoralReef();
+        let depthFog = ctx.createLinearGradient(0, canvas.height * 0.55, 0, canvas.height);
+        depthFog.addColorStop(0, "rgba(2, 12, 22, 0)"); depthFog.addColorStop(1, "rgba(2, 12, 22, 0.55)");
+        ctx.fillStyle = depthFog; ctx.fillRect(0, canvas.height * 0.55, canvas.width, canvas.height * 0.45);
 
         kelpFronds.forEach(k => {
             const sway = Math.sin(timeTick * 0.015 + k.phase) * k.sway;
             ctx.strokeStyle = "rgba(6, 78, 59, 0.35)"; ctx.lineWidth = 6; ctx.beginPath();
             ctx.moveTo(k.x, canvas.height); ctx.quadraticCurveTo(k.x + sway, canvas.height - k.height * 0.5, k.x + sway * 1.6, canvas.height - k.height); ctx.stroke();
         });
+
+        drawAnemones();
 
         if (Math.random() < 0.06 * dt) environmentBubbles.push({ x: Math.random() * canvas.width, y: canvas.height + 20, r: Math.random() * 2.5 + 1, speed: Math.random() * 0.8 + 0.4, drift: (Math.random() - 0.5) * 0.4 });
         environmentBubbles.forEach((b, i) => { b.y -= b.speed * dt; b.x += b.drift * dt; ctx.fillStyle = "rgba(52, 211, 153, 0.12)"; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); if (b.y < -10) environmentBubbles.splice(i, 1); });
