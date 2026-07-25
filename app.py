@@ -886,16 +886,38 @@ game_html += r"""
         ctx.save(); ctx.globalAlpha = 0.16; ctx.fillStyle = "#000814"; ctx.beginPath(); ctx.ellipse(r * 0.05, r * (0.95 * bodyYScale + 0.35), r * 0.95, r * 0.22, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();
 
         // ---- real fish-art sprite path: if this species has a prepared sprite, draw the photo instead
-        // of the procedural body (aura + contact shadow above still apply), then bail out. ----
+        // of the procedural body, but ANIMATE it so it swims like the vector fish. We slice the image into
+        // vertical strips and offset each strip with a sine wave that travels head->tail, producing the
+        // classic body undulation. Layered on top: a vertical swim bob and a slow body roll. ----
         if (species.sprite && species.sprite.canvas) {
             const sp = species.sprite, cv = sp.canvas;
             const spriteW = r * 2.9;                          // footprint roughly matches the procedural fish
             const spriteH = spriteW * (cv.height / cv.width);
-            const bob = Math.sin(pulseTick * wagSpeed) * r * 0.05; // gentle swim bob
+            const bob = Math.sin(pulseTick * wagSpeed) * r * 0.06;         // whole-body vertical bob
+            const roll = Math.sin(pulseTick * wagSpeed * 0.5) * 0.06;      // slow lazy body roll
             ctx.save();
             if (sp.facesLeft) ctx.scale(-1, 1);               // normalise art so "default" faces right
             ctx.imageSmoothingEnabled = true;
-            ctx.drawImage(cv, -spriteW / 2, -spriteH / 2 + bob, spriteW, spriteH);
+            ctx.translate(0, bob);
+            ctx.rotate(roll);
+
+            const strips = 22;                                 // more strips = smoother wave
+            const srcStripW = cv.width / strips;
+            const dstStripW = spriteW / strips;
+            const amp = r * (0.14 + Math.min(0.12, speedMag * 0.08)); // tail sway grows with speed
+            const waveLen = 2.4;                               // waves along the body length
+            for (let i = 0; i < strips; i++) {
+                // s: 0 at left edge (tail, after facing-right normalisation) -> 1 at right edge (head)
+                const s = i / (strips - 1);
+                const tailFactor = (1 - s) * (1 - s);          // head barely moves, tail swings most
+                const phase = pulseTick * wagSpeed + s * waveLen * Math.PI;
+                const offsetY = Math.sin(phase) * amp * tailFactor;
+                const dstX = -spriteW / 2 + i * dstStripW;
+                ctx.drawImage(
+                    cv, i * srcStripW, 0, srcStripW, cv.height,
+                    dstX, -spriteH / 2 + offsetY, dstStripW + 0.6, spriteH  // +0.6 overlap hides seams
+                );
+            }
             ctx.restore();
             ctx.restore(); // closes the ctx.save() at the top of drawRealisticFish
             return;
@@ -1095,48 +1117,63 @@ game_html += r"""
         if (animationFrameId) cancelAnimationFrame(animationFrameId); animationFrameId = requestAnimationFrame(runGameLoop);
     }
 
-    // Quota-based spawning: each chapter has a finite set of edible fish to eat (chapter.quota).
-    // Edible fish grow small -> medium -> big as the chapter progresses (the big ones come last).
-    // Predator fish (bigger than the player) also spawn as avoidable hazards but don't count toward the quota.
+    // Spawning has three fish kinds:
+    //   - BIG fish   : large edible targets (0.74–0.90 of the player). Eating ALL of them (chapter.quota)
+    //                  completes the chapter. A limited number exist per chapter.
+    //   - SMALL fish : little edible fish that spawn freely so the player always has snacks to grow on.
+    //   - PREDATORS  : bigger-than-player hazards that end the run on contact.
     // Hard-capped at MAX_FISH_ON_SCREEN, spawned one at a time so the screen never floods.
     function generateMarineLife() {
         if (!gameActive || gamePaused || chapterComplete) return;
         if (marineThreats.length >= MAX_FISH_ON_SCREEN) return;
 
         const chapter = CHAPTERS[currentChapter] || CHAPTERS[0];
-        const quota = chapter.quota;
+        const bigQuota = chapter.quota;
 
-        let edibleCount = 0, predatorCount = 0;
-        marineThreats.forEach(t => { if (t.edible) edibleCount++; else predatorCount++; });
+        let bigCount = 0, smallCount = 0, predatorCount = 0;
+        marineThreats.forEach(t => {
+            if (!t.edible) predatorCount++;
+            else if (t.isBig) bigCount++;
+            else smallCount++;
+        });
 
-        // Don't let (already-eaten + still-swimming edible) exceed the chapter quota.
-        const edibleRemaining = quota - eatenThisChapter - edibleCount;
-        const needEdible = edibleRemaining > 0 && edibleCount < TARGET_PER_SIDE;
-        const needPredator = predatorCount < TARGET_PER_SIDE;
-        if (!needEdible && !needPredator) return;
-        const makeEdible = needEdible && (!needPredator || Math.random() < 0.6);
+        // Big fish still owed this chapter (quota minus already-eaten minus those currently swimming).
+        const bigRemaining = bigQuota - eatenThisChapter - bigCount;
+        const needBig = bigRemaining > 0 && bigCount < 2;
+        const needSmall = smallCount < 3;
+        const needPredator = predatorCount < 2;
+        if (!needBig && !needSmall && !needPredator) return;
+
+        // Pick a kind, biasing toward keeping a couple of big targets on screen.
+        let kind;
+        const roll = Math.random();
+        if (needBig && roll < 0.42) kind = "big";
+        else if (needSmall && roll < 0.80) kind = "small";
+        else if (needPredator) kind = "predator";
+        else if (needBig) kind = "big";
+        else if (needSmall) kind = "small";
+        else return;
 
         const spawnFromLeft = Math.random() > 0.5;
         const pool = chapter.speciesPool;
         const speciesIdx = pool[Math.floor(Math.random() * pool.length)];
         const specificType = Math.floor(Math.random() * 3) + 1;
 
-        let sizeRadius;
-        if (makeEdible) {
-            // Tier based on how far into the chapter's quota we are: small -> medium -> big.
-            const progress = eatenThisChapter / quota;
-            let lo, hi;
-            if (progress < 0.34) { lo = 0.38; hi = 0.52; }        // small
-            else if (progress < 0.67) { lo = 0.56; hi = 0.70; }   // medium
-            else { lo = 0.78; hi = 0.92; }                        // big (still edible)
-            sizeRadius = Math.max(6, player.radius * (lo + Math.random() * (hi - lo)));
+        let sizeRadius, edible, isBig;
+        if (kind === "big") {
+            sizeRadius = Math.max(10, player.radius * (0.74 + Math.random() * 0.16)); // 0.74–0.90
+            edible = true; isBig = true;
+        } else if (kind === "small") {
+            sizeRadius = Math.max(6, player.radius * (0.30 + Math.random() * 0.28));   // 0.30–0.58
+            edible = true; isBig = false;
         } else {
             sizeRadius = player.radius + (Math.random() * 16 + 6);
+            edible = false; isBig = false;
         }
 
         const baseY = Math.random() * (canvas.height - 90) + 45;
         const baseSpeed = (Math.random() * 0.55 + 0.5) * (spawnFromLeft ? 1 : -1);
-        marineThreats.push({ x: spawnFromLeft ? -60 : canvas.width + 60, y: baseY, radius: sizeRadius, vx: baseSpeed, vy: 0, fishType: specificType, speciesIdx, wagPhase: Math.random() * 100, edible: makeEdible });
+        marineThreats.push({ x: spawnFromLeft ? -60 : canvas.width + 60, y: baseY, radius: sizeRadius, vx: baseSpeed, vy: 0, fishType: specificType, speciesIdx, wagPhase: Math.random() * 100, edible, isBig });
     }
 
     function getRankName(r) { if (r < 23) return "MINNOW"; if (r < 32) return "BASS"; if (r < 42) return "TUNA"; if (r < 52) return "BARRACUDA"; return "APEX SHARK"; }
