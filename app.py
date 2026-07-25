@@ -94,6 +94,7 @@ game_html += r"""
                 <div id="scoreLabel">SCORE: 00000</div>
             </div>
             <div id="sizeLabel">SIZE: SMALL  0/10</div>
+            <div id="livesLabel" style="color:#f87171; text-shadow:0 0 8px #7f1d1d; letter-spacing:2px;">LIVES ♥ ♥ ♥</div>
         </div>
         <div id="chapterLabel" style="display:none;">MAP 1 / 5 — CORAL SHALLOWS</div>
 
@@ -131,6 +132,16 @@ game_html += r"""
             <button id="overlayExitBtn">EXIT TO TITLE</button>
         </div>
 
+        <div id="lifeLostOverlay" style="position:absolute; inset:0; background:rgba(16,2,2,0.82); backdrop-filter:blur(6px); display:none; flex-direction:column; align-items:center; justify-content:center; z-index:27; text-align:center;">
+            <div style="background:rgba(34,6,6,0.94); border:1px solid rgba(248,113,113,0.45); border-radius:18px; padding:34px 32px; box-shadow:0 18px 50px rgba(0,0,0,0.6); min-width:290px;">
+                <div style="font-size:11px; letter-spacing:5px; color:#f87171; text-shadow:0 0 10px #7f1d1d;">CONSUMED</div>
+                <h2 id="lifeLostTitle" style="color:#ffffff; letter-spacing:2px; font-size:24px; margin:8px 0 6px; text-shadow:0 0 16px rgba(248,113,113,0.8);">YOU GOT 2 LIVES LEFT</h2>
+                <div id="lifeLostHearts" style="font-size:22px; letter-spacing:6px; color:#f87171; margin:6px 0 2px;">♥ ♥</div>
+                <p id="lifeLostSub" style="color:#fca5a5; font-size:12px; max-width:300px; line-height:1.6; margin:6px auto 4px;">Respawning in the same chapter — keep your progress!</p>
+                <button class="menu-btn primary" id="lifeContinueBtn" style="margin-top:22px;">CONTINUE ▶</button>
+            </div>
+        </div>
+
         <div id="chapterCompleteOverlay" style="position:absolute; inset:0; background:rgba(1,8,16,0.82); backdrop-filter:blur(6px); display:none; flex-direction:column; align-items:center; justify-content:center; z-index:26; text-align:center;">
             <div style="background:rgba(4,22,34,0.92); border:1px solid rgba(52,211,153,0.4); border-radius:18px; padding:34px 32px; box-shadow:0 18px 50px rgba(0,0,0,0.55); min-width:280px;">
                 <div style="font-size:11px; letter-spacing:5px; color:#34d399; text-shadow:0 0 10px #047857;">CHAPTER COMPLETED</div>
@@ -161,6 +172,16 @@ game_html += r"""
     const chapterCompleteTitle = document.getElementById("chapterCompleteTitle");
     const chapterCompleteSub = document.getElementById("chapterCompleteSub");
     const continueBtn = document.getElementById("continueBtn");
+    const livesLabel = document.getElementById("livesLabel");
+    const lifeLostOverlay = document.getElementById("lifeLostOverlay");
+    const lifeLostTitle = document.getElementById("lifeLostTitle");
+    const lifeLostHearts = document.getElementById("lifeLostHearts");
+    const lifeLostSub = document.getElementById("lifeLostSub");
+    const lifeContinueBtn = document.getElementById("lifeContinueBtn");
+
+    // ---- Lives system ----
+    const MAX_LIVES = 3;
+    let lives = MAX_LIVES;
 
     // ---- Discrete fish-size progression ----
     // Player has 4 fixed sizes per chapter: small -> medium -> big -> large.
@@ -192,18 +213,36 @@ game_html += r"""
     // Painterly reef-fish species palettes — banded bodies + eye-mask stripe + bright fin tips, in the
     // spirit of a real angelfish/butterflyfish rather than a single flat cartoon hue. Expanded roster
     // so each chapter/biome can draw from its own believable palette pool instead of reusing everything.
+    // Each species now carries a `shape` profile so every fish GROUP has its own distinct
+    // silhouette + fins + animation quirk (not just a colour swap):
+    //   profile  — body outline used by traceFishBody: "disc" | "torpedo" | "tall" | "slim" | "balanced" | "bulb"
+    //   yScale   — vertical body stretch (tall vs slender)
+    //   tail     — caudal fin style: "fan" | "fork" | "flow" (long trailing) | "lunate" (crescent)
+    //   dorsal   — "low" | "sail" (big) | "spiny"
+    //   wag      — tail-beat multiplier (fast darters wag quicker)
+    //   extra    — special feature drawn on top: "finlets" | "lure" | "barbel" | null
     const FISH_SPECIES = [
-        { bands: ["#eaf7ff", "#2f8fd1", "#0d3f6b"], finColor: "#ffcf4d", maskColor: "#0b1a2b" },   // blue tang
-        { bands: ["#fff3d6", "#f2b23c", "#7a4c0c"], finColor: "#2f8fd1", maskColor: "#241505" },   // yellow butterflyfish
-        { bands: ["#ffe7d9", "#ff8a4d", "#96350c"], finColor: "#ffffff", maskColor: "#160a04" },   // clownfish orange
-        { bands: ["#eee9ff", "#8f7bff", "#33246e"], finColor: "#8be7ff", maskColor: "#140a2b" },   // violet damsel
-        { bands: ["#e8fff3", "#33c48a", "#0e4a32"], finColor: "#ffe37a", maskColor: "#06231a" },   // parrotfish green
-        { bands: ["#f4ffe8", "#9ad14a", "#3d5c14"], finColor: "#ffb84d", maskColor: "#16240a" },   // olive wrasse (kelp)
-        { bands: ["#d9f4ff", "#4aa8c9", "#123a4a"], finColor: "#c9f2ff", maskColor: "#04141c" },   // silver-blue baitfish (rocky/open)
-        { bands: ["#2a2540", "#4b3a78", "#120f24"], finColor: "#7de8d8", maskColor: "#050414" },   // bioluminescent deep-fish (twilight/abyss)
-        { bands: ["#1c1230", "#33205c", "#0a0618"], finColor: "#ff5fb0", maskColor: "#04020a" },   // deep-sea anglerish cousin (abyss)
+        { name: "SEA FISH",       bands: ["#eaf7ff", "#2f8fd1", "#0d3f6b"], finColor: "#ffcf4d", maskColor: "#0b1a2b",
+          shape: { profile: "balanced", yScale: 0.82, tail: "fan",    dorsal: "low",   wag: 1.0, extra: null } },        // blue tang
+        { name: "GOLD FISH",      bands: ["#fff3d6", "#f2b23c", "#7a4c0c"], finColor: "#ffd873", maskColor: "#241505",
+          shape: { profile: "disc",     yScale: 1.05, tail: "flow",   dorsal: "sail",  wag: 0.7, extra: null } },        // fat round goldfish w/ flowing tail
+        { name: "CLOWN FISH",     bands: ["#ffe7d9", "#ff8a4d", "#96350c"], finColor: "#ffffff", maskColor: "#160a04",
+          shape: { profile: "tall",     yScale: 0.98, tail: "fan",    dorsal: "spiny", wag: 1.1, extra: null } },        // stout tall-bodied clownfish
+        { name: "SPAR FISH",      bands: ["#eee9ff", "#8f7bff", "#33246e"], finColor: "#8be7ff", maskColor: "#140a2b",
+          shape: { profile: "slim",     yScale: 0.66, tail: "fork",   dorsal: "low",   wag: 1.3, extra: null } },        // slender darting spar
+        { name: "YELLOWFIN TUNA", bands: ["#e8fff3", "#2f6fd1", "#0e2a4a"], finColor: "#ffe37a", maskColor: "#06231a",
+          shape: { profile: "torpedo",  yScale: 0.70, tail: "lunate", dorsal: "sail",  wag: 1.5, extra: "finlets" } },   // fast torpedo tuna w/ crescent tail + finlets
+        { name: "KELP WRASSE",    bands: ["#f4ffe8", "#9ad14a", "#3d5c14"], finColor: "#ffb84d", maskColor: "#16240a",
+          shape: { profile: "slim",     yScale: 0.70, tail: "fan",    dorsal: "spiny", wag: 1.15, extra: null } },       // slim wrasse
+        { name: "SILVER BAITFISH",bands: ["#d9f4ff", "#4aa8c9", "#123a4a"], finColor: "#c9f2ff", maskColor: "#04141c",
+          shape: { profile: "torpedo",  yScale: 0.64, tail: "fork",   dorsal: "low",   wag: 1.4, extra: null } },        // quick baitfish
+        { name: "LANTERN FISH",   bands: ["#2a2540", "#4b3a78", "#120f24"], finColor: "#7de8d8", maskColor: "#050414",
+          shape: { profile: "balanced", yScale: 0.80, tail: "fork",   dorsal: "low",   wag: 1.0, extra: "barbel" } },    // deep lantern fish
+        { name: "ANGLERFISH",     bands: ["#1c1230", "#33205c", "#0a0618"], finColor: "#ff5fb0", maskColor: "#04020a",
+          shape: { profile: "bulb",     yScale: 1.02, tail: "fan",    dorsal: "spiny", wag: 0.8, extra: "lure" } },      // round bulbous anglerfish w/ glowing lure
     ];
-    const PLAYER_SPECIES = { bands: ["#eafff5", "#10b981", "#04351f"], finColor: "#facc15", maskColor: "#04120b" };
+    const PLAYER_SPECIES = { bands: ["#eafff5", "#10b981", "#04351f"], finColor: "#facc15", maskColor: "#04120b",
+          shape: { profile: "balanced", yScale: 0.80, tail: "fork", dorsal: "spiny", wag: 1.0, extra: null } };
 
     /* ---------- 5 chapter maps ----------
        As the player grows, the game descends through 5 distinct biomes: brighter/shallower to
@@ -452,8 +491,9 @@ game_html += r"""
         if (!animationFrameId) animationFrameId = requestAnimationFrame(runGameLoop);
     }
     function togglePause() {
-        // Ignore pause/resume while the chapter-complete message box is open.
+        // Ignore pause/resume while a modal message box (chapter-complete or life-lost) is open.
         if (chapterCompleteOverlay.style.display === "flex") return;
+        if (lifeLostOverlay.style.display === "flex") return;
         gamePaused ? resumeGame() : pauseGame();
     }
 
@@ -463,6 +503,8 @@ game_html += r"""
         if (spawnIntervalId) { clearInterval(spawnIntervalId); spawnIntervalId = null; }
         pauseOverlay.style.display = "none";
         screenOverlay.style.display = "none";
+        chapterCompleteOverlay.style.display = "none";
+        lifeLostOverlay.style.display = "none";
         hud.style.display = "none";
         chapterLabel.style.display = "none";
         chapterBanner.classList.remove("show");
@@ -768,14 +810,58 @@ game_html += r"""
     }
 
     // Real fish outline: pointed snout at +x, full mid-body, tapering down to a narrow tail peduncle at -x.
-    function traceFishBody(r) {
+    // `profile` reshapes the silhouette per species so each group reads as a different fish.
+    function traceFishBody(r, profile) {
         ctx.beginPath();
-        ctx.moveTo(r * 1.10, r * 0.06);                                                     // snout tip
-        ctx.bezierCurveTo(r * 0.86, -r * 0.44, r * 0.42, -r * 0.92, -r * 0.06, -r * 0.90);  // forehead -> back
-        ctx.bezierCurveTo(-r * 0.44, -r * 0.88, -r * 0.72, -r * 0.58, -r * 0.94, -r * 0.20);// back -> peduncle top
-        ctx.quadraticCurveTo(-r * 1.00, 0, -r * 0.94, r * 0.20);                            // narrow peduncle
-        ctx.bezierCurveTo(-r * 0.70, r * 0.60, -r * 0.38, r * 0.92, r * 0.06, r * 0.94);    // belly rear
-        ctx.bezierCurveTo(r * 0.52, r * 0.96, r * 0.90, r * 0.52, r * 1.10, r * 0.06);      // belly -> chin -> snout
+        switch (profile) {
+            case "disc": // fat round goldfish — deep belly, high rounded back, short body
+                ctx.moveTo(r * 1.02, r * 0.10);
+                ctx.bezierCurveTo(r * 0.78, -r * 0.70, r * 0.26, -r * 1.12, -r * 0.18, -r * 1.02);
+                ctx.bezierCurveTo(-r * 0.50, -r * 0.94, -r * 0.78, -r * 0.60, -r * 0.92, -r * 0.22);
+                ctx.quadraticCurveTo(-r * 0.98, 0, -r * 0.92, r * 0.22);
+                ctx.bezierCurveTo(-r * 0.74, r * 0.70, -r * 0.44, r * 1.12, r * 0.06, r * 1.10);
+                ctx.bezierCurveTo(r * 0.54, r * 1.06, r * 0.86, r * 0.60, r * 1.02, r * 0.10);
+                break;
+            case "tall": // clownfish / butterflyfish — very deep, laterally compressed body
+                ctx.moveTo(r * 1.06, r * 0.08);
+                ctx.bezierCurveTo(r * 0.80, -r * 0.78, r * 0.30, -r * 1.16, -r * 0.10, -r * 1.10);
+                ctx.bezierCurveTo(-r * 0.48, -r * 1.04, -r * 0.76, -r * 0.60, -r * 0.94, -r * 0.20);
+                ctx.quadraticCurveTo(-r * 1.00, 0, -r * 0.94, r * 0.20);
+                ctx.bezierCurveTo(-r * 0.72, r * 0.62, -r * 0.40, r * 1.14, r * 0.06, r * 1.12);
+                ctx.bezierCurveTo(r * 0.56, r * 1.10, r * 0.90, r * 0.62, r * 1.06, r * 0.08);
+                break;
+            case "torpedo": // tuna / baitfish — long, sleek, narrow spindle
+                ctx.moveTo(r * 1.22, r * 0.04);
+                ctx.bezierCurveTo(r * 0.90, -r * 0.34, r * 0.30, -r * 0.72, -r * 0.20, -r * 0.70);
+                ctx.bezierCurveTo(-r * 0.56, -r * 0.68, -r * 0.82, -r * 0.44, -r * 1.02, -r * 0.14);
+                ctx.quadraticCurveTo(-r * 1.08, 0, -r * 1.02, r * 0.14);
+                ctx.bezierCurveTo(-r * 0.80, r * 0.46, -r * 0.50, r * 0.70, r * 0.06, r * 0.72);
+                ctx.bezierCurveTo(r * 0.58, r * 0.74, r * 0.96, r * 0.42, r * 1.22, r * 0.04);
+                break;
+            case "slim": // spar / wrasse — trim, moderately slender
+                ctx.moveTo(r * 1.14, r * 0.05);
+                ctx.bezierCurveTo(r * 0.86, -r * 0.40, r * 0.40, -r * 0.74, -r * 0.10, -r * 0.72);
+                ctx.bezierCurveTo(-r * 0.48, -r * 0.70, -r * 0.76, -r * 0.48, -r * 0.98, -r * 0.16);
+                ctx.quadraticCurveTo(-r * 1.04, 0, -r * 0.98, r * 0.16);
+                ctx.bezierCurveTo(-r * 0.74, r * 0.50, -r * 0.42, r * 0.74, r * 0.06, r * 0.76);
+                ctx.bezierCurveTo(r * 0.56, r * 0.78, r * 0.92, r * 0.44, r * 1.14, r * 0.05);
+                break;
+            case "bulb": // anglerfish — huge blunt head, tapering fast to a small tail
+                ctx.moveTo(r * 1.14, r * 0.28);
+                ctx.bezierCurveTo(r * 1.02, -r * 0.60, r * 0.50, -r * 1.06, -r * 0.02, -r * 0.96);
+                ctx.bezierCurveTo(-r * 0.44, -r * 0.88, -r * 0.74, -r * 0.52, -r * 0.94, -r * 0.18);
+                ctx.quadraticCurveTo(-r * 1.00, 0, -r * 0.94, r * 0.18);
+                ctx.bezierCurveTo(-r * 0.72, r * 0.54, -r * 0.40, r * 0.92, r * 0.10, r * 1.00);
+                ctx.bezierCurveTo(r * 0.62, r * 1.06, r * 1.04, r * 0.86, r * 1.14, r * 0.28);
+                break;
+            default: // "balanced" — the original generic reef fish
+                ctx.moveTo(r * 1.10, r * 0.06);
+                ctx.bezierCurveTo(r * 0.86, -r * 0.44, r * 0.42, -r * 0.92, -r * 0.06, -r * 0.90);
+                ctx.bezierCurveTo(-r * 0.44, -r * 0.88, -r * 0.72, -r * 0.58, -r * 0.94, -r * 0.20);
+                ctx.quadraticCurveTo(-r * 1.00, 0, -r * 0.94, r * 0.20);
+                ctx.bezierCurveTo(-r * 0.70, r * 0.60, -r * 0.38, r * 0.92, r * 0.06, r * 0.94);
+                ctx.bezierCurveTo(r * 0.52, r * 0.96, r * 0.90, r * 0.52, r * 1.10, r * 0.06);
+        }
         ctx.closePath();
     }
 
@@ -785,11 +871,14 @@ game_html += r"""
 
         if (auraColorRgb) drawAura(r, auraColorRgb, auraColorRgb === "239, 68, 68");
 
-        const wagSpeed = 0.1 + Math.min(0.28, speedMag * 0.2);
+        // Per-species shape profile drives silhouette, fins and swim animation.
+        const shape = (species && species.shape) ? species.shape : { profile: "balanced", yScale: 0.80, tail: "fan", dorsal: "low", wag: 1.0, extra: null };
+
+        const wagSpeed = (0.1 + Math.min(0.28, speedMag * 0.2)) * shape.wag;
         const wag = Math.sin(pulseTick * wagSpeed) * (r * (0.2 + Math.min(0.15, speedMag * 0.1)));
         const tailWag = Math.sin(pulseTick * wagSpeed + 0.6) * (r * 0.34);
-        // body depth by species build: 1 = deep/disc, 2 = slender torpedo, 3 = balanced
-        const bodyYScale = fishType === 1 ? 1.02 : (fishType === 2 ? 0.60 : 0.80);
+        // body depth comes from the species profile now (tall/disc = deep, torpedo/slim = slender)
+        const bodyYScale = shape.yScale;
 
         // contact shadow (depth cue)
         ctx.save(); ctx.globalAlpha = 0.16; ctx.fillStyle = "#000814"; ctx.beginPath(); ctx.ellipse(r * 0.05, r * (0.95 * bodyYScale + 0.35), r * 0.95, r * 0.22, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();
@@ -800,13 +889,25 @@ game_html += r"""
         tailGrd.addColorStop(0, species.bands[2]); tailGrd.addColorStop(0.55, species.bands[1]); tailGrd.addColorStop(1, species.finColor);
         ctx.fillStyle = tailGrd; ctx.globalAlpha = 0.9;
         ctx.beginPath();
-        if (fishType === 2) { // deep fork (fast swimmer)
+        if (shape.tail === "fork") { // deep V fork (fast swimmer)
             ctx.moveTo(tx, -r * 0.12 * bodyYScale);
             ctx.quadraticCurveTo(-r * 1.5, -r * 0.95 + tailWag, -r * 2.15, -r * 1.05 + tailWag);
             ctx.quadraticCurveTo(-r * 1.42, -r * 0.16 + tailWag * 0.7, -r * 1.30, tailWag * 0.6);
             ctx.quadraticCurveTo(-r * 1.42, r * 0.16 + tailWag * 0.7, -r * 2.15, r * 1.05 + tailWag);
             ctx.quadraticCurveTo(-r * 1.5, r * 0.95 + tailWag, tx, r * 0.12 * bodyYScale);
-        } else { // fan / rounded caudal
+        } else if (shape.tail === "lunate") { // crescent/sickle tail (tuna) — narrow tips, tight centre
+            ctx.moveTo(tx, -r * 0.10 * bodyYScale);
+            ctx.quadraticCurveTo(-r * 1.7, -r * 1.02 + tailWag, -r * 2.35, -r * 1.16 + tailWag);
+            ctx.quadraticCurveTo(-r * 1.9, -r * 0.4 + tailWag, -r * 1.28, tailWag * 0.5);
+            ctx.quadraticCurveTo(-r * 1.9, r * 0.4 + tailWag, -r * 2.35, r * 1.16 + tailWag);
+            ctx.quadraticCurveTo(-r * 1.7, r * 1.02 + tailWag, tx, r * 0.10 * bodyYScale);
+        } else if (shape.tail === "flow") { // long flowing double tail (goldfish) — soft, veil-like
+            ctx.moveTo(tx, -r * 0.16 * bodyYScale);
+            ctx.quadraticCurveTo(-r * 1.7, -r * 1.35 + tailWag * 1.3, -r * 2.35, -r * 0.55 + tailWag * 1.5);
+            ctx.quadraticCurveTo(-r * 1.55, -r * 0.25 + tailWag, -r * 1.4, tailWag * 0.8);
+            ctx.quadraticCurveTo(-r * 1.55, r * 0.25 + tailWag, -r * 2.35, r * 0.55 + tailWag * 1.5);
+            ctx.quadraticCurveTo(-r * 1.7, r * 1.35 + tailWag * 1.3, tx, r * 0.16 * bodyYScale);
+        } else { // "fan" / rounded caudal
             ctx.moveTo(tx, -r * 0.14 * bodyYScale);
             ctx.quadraticCurveTo(-r * 1.45, -r * 0.78 + tailWag, -r * 1.95, -r * 0.72 + tailWag);
             ctx.quadraticCurveTo(-r * 1.55, tailWag * 0.9, -r * 1.95, r * 0.72 + tailWag);
@@ -822,16 +923,26 @@ game_html += r"""
         }
         ctx.globalAlpha = 1;
 
-        // ---- dorsal fin: spiny ridge along the back with a soft trailing edge ----
-        let dorsalGrd = ctx.createLinearGradient(0, -r * bodyYScale * 0.85, 0, -r * bodyYScale * 1.75);
+        // ---- dorsal fin: spiny ridge along the back; "sail" species get a tall raised fin ----
+        const dorsalH = shape.dorsal === "sail" ? 1.95 : (shape.dorsal === "spiny" ? 1.55 : 1.45);
+        let dorsalGrd = ctx.createLinearGradient(0, -r * bodyYScale * 0.85, 0, -r * bodyYScale * (dorsalH + 0.3));
         dorsalGrd.addColorStop(0, species.bands[1]); dorsalGrd.addColorStop(1, species.finColor);
         ctx.fillStyle = dorsalGrd; ctx.globalAlpha = 0.94;
         ctx.beginPath();
         ctx.moveTo(-r * 0.72, -r * 0.55 * bodyYScale);
-        ctx.quadraticCurveTo(-r * 0.30, -r * (1.45 * bodyYScale) + wag * 0.3, r * 0.16, -r * (1.22 * bodyYScale));
+        ctx.quadraticCurveTo(-r * 0.30, -r * (dorsalH * bodyYScale) + wag * 0.3, r * 0.16, -r * ((dorsalH - 0.23) * bodyYScale));
         ctx.quadraticCurveTo(r * 0.34, -r * (0.98 * bodyYScale), r * 0.42, -r * (0.72 * bodyYScale));
         ctx.quadraticCurveTo(-r * 0.10, -r * (0.86 * bodyYScale), -r * 0.72, -r * 0.55 * bodyYScale);
         ctx.closePath(); ctx.fill();
+        // spiny rays for "spiny" dorsals (clownfish / anglerfish / wrasse)
+        if (shape.dorsal === "spiny") {
+            ctx.strokeStyle = "rgba(255,255,255,0.30)"; ctx.lineWidth = Math.max(0.5, r * 0.03);
+            for (let i = 0; i <= 4; i++) {
+                const fx = -r * 0.5 + i * r * 0.22;
+                ctx.beginPath(); ctx.moveTo(fx, -r * 0.6 * bodyYScale);
+                ctx.lineTo(fx + r * 0.04, -r * (dorsalH - 0.35) * bodyYScale + wag * 0.2); ctx.stroke();
+            }
+        }
         ctx.globalAlpha = 1;
 
         // ---- anal fin (underside, rear) ----
@@ -846,7 +957,7 @@ game_html += r"""
         ctx.save();
         ctx.scale(1, bodyYScale);
         ctx.save();
-        traceFishBody(r); ctx.clip();
+        traceFishBody(r, shape.profile); ctx.clip();
 
         ctx.fillStyle = species.bands[0]; ctx.fillRect(-r * 1.3, -r * 1.3, r * 2.7, r * 2.6);
         ctx.fillStyle = species.bands[1];
@@ -931,7 +1042,7 @@ game_html += r"""
         ctx.restore(); // drop clip
 
         // silhouette edge: dark outline + top rim highlight so the shape reads clearly underwater
-        traceFishBody(r);
+        traceFishBody(r, shape.profile);
         ctx.strokeStyle = "rgba(1,6,14,0.55)"; ctx.lineWidth = Math.max(1, r * 0.06); ctx.stroke();
         ctx.save(); ctx.clip();
         ctx.strokeStyle = "rgba(255,255,255,0.45)"; ctx.lineWidth = Math.max(1, r * 0.10);
@@ -965,6 +1076,34 @@ game_html += r"""
         ctx.fillStyle = "#020617"; ctx.beginPath(); ctx.arc(eyeX + eyeRadius * 0.12, eyeY, eyeRadius * 0.52, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(eyeX + eyeRadius * 0.34, eyeY - eyeRadius * 0.24, eyeRadius * 0.17, 0, Math.PI * 2); ctx.fill();
 
+        // ---- species-specific extras ----
+        if (shape.extra === "finlets") {
+            // small yellow finlets running along the top/bottom of the tuna's tail stalk
+            ctx.fillStyle = species.finColor; ctx.globalAlpha = 0.85;
+            for (let i = 0; i < 4; i++) {
+                const fx = -r * 0.5 - i * r * 0.16;
+                ctx.beginPath(); ctx.moveTo(fx, -r * 0.42); ctx.lineTo(fx - r * 0.08, -r * 0.56); ctx.lineTo(fx - r * 0.12, -r * 0.42); ctx.closePath(); ctx.fill();
+                ctx.beginPath(); ctx.moveTo(fx, r * 0.42); ctx.lineTo(fx - r * 0.08, r * 0.56); ctx.lineTo(fx - r * 0.12, r * 0.42); ctx.closePath(); ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+        } else if (shape.extra === "lure") {
+            // anglerfish illicium (stalk) + glowing bulb bobbing in front of the head
+            const bob = Math.sin(pulseTick * 0.09) * r * 0.12;
+            const bx = r * 1.15, by = -r * 0.95 * bodyYScale + bob;
+            ctx.strokeStyle = "rgba(220,220,235,0.6)"; ctx.lineWidth = Math.max(1, r * 0.06);
+            ctx.beginPath(); ctx.moveTo(r * 0.5, -r * 0.7 * bodyYScale); ctx.quadraticCurveTo(r * 1.0, -r * 1.2 * bodyYScale, bx, by); ctx.stroke();
+            const glow = ctx.createRadialGradient(bx, by, 0, bx, by, r * 0.45);
+            glow.addColorStop(0, "rgba(255,240,180,0.95)"); glow.addColorStop(0.4, "rgba(255,210,120,0.5)"); glow.addColorStop(1, "rgba(255,200,90,0)");
+            ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(bx, by, r * 0.45, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "#fff6d6"; ctx.beginPath(); ctx.arc(bx, by, Math.max(1.5, r * 0.11), 0, Math.PI * 2); ctx.fill();
+        } else if (shape.extra === "barbel") {
+            // pair of thin chin barbels trailing from the snout
+            ctx.strokeStyle = "rgba(200,220,225,0.5)"; ctx.lineWidth = Math.max(0.6, r * 0.03);
+            const bw = Math.sin(pulseTick * 0.12) * r * 0.1;
+            ctx.beginPath(); ctx.moveTo(r * 1.02, r * 0.18); ctx.quadraticCurveTo(r * 1.4, r * 0.4 + bw, r * 1.55, r * 0.7 + bw); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(r * 1.0, r * 0.24); ctx.quadraticCurveTo(r * 1.32, r * 0.5 + bw, r * 1.42, r * 0.82 + bw); ctx.stroke();
+        }
+
         ctx.restore();
     }
 
@@ -975,14 +1114,14 @@ game_html += r"""
 # Part E: Faster, frame-rate-independent physics; capped/targeted spawning (max 8 fish, ~3 edible + ~3 not); game loop
 game_html += r"""
     function initiateArcadeGame() {
-        setupAudio(); score = 0; gameActive = true; gamePaused = false;
+        setupAudio(); score = 0; gameActive = true; gamePaused = false; lives = MAX_LIVES;
         player.tier = 0; player.eatenThisTier = 0; player.radius = TIER_RADII[0];
         player.x = canvas.width / 2; player.y = canvas.height / 2; player.targetX = player.x; player.targetY = player.y; player.vx = 0; player.vy = 0;
         marineThreats = []; environmentBubbles = []; particles = []; screenShake = 0; lastTimestamp = null;
         currentChapter = 0; regenerateKelp(); regenerateReef();
-        screenOverlay.style.display = "none"; pauseOverlay.style.display = "none"; titleScreen.style.display = "none"; chapterCompleteOverlay.style.display = "none"; hud.style.display = "flex";
+        screenOverlay.style.display = "none"; pauseOverlay.style.display = "none"; titleScreen.style.display = "none"; chapterCompleteOverlay.style.display = "none"; lifeLostOverlay.style.display = "none"; hud.style.display = "flex";
         chapterLabel.style.display = "block";
-        scoreLabel.innerText = "SCORE: 00000"; updateSizeHud();
+        scoreLabel.innerText = "SCORE: 00000"; updateSizeHud(); updateLivesHud();
         showChapterBanner(0);
         if (spawnIntervalId) clearInterval(spawnIntervalId); spawnIntervalId = setInterval(generateMarineLife, 650);
         if (animationFrameId) cancelAnimationFrame(animationFrameId); animationFrameId = requestAnimationFrame(runGameLoop);
@@ -992,6 +1131,48 @@ game_html += r"""
     function updateSizeHud() {
         sizeLabel.innerText = `SIZE: ${TIER_NAMES[player.tier]}  ${player.eatenThisTier}/${FISH_PER_TIER}`;
     }
+
+    // Render the remaining lives as hearts in the top-right HUD.
+    function updateLivesHud() {
+        const hearts = "♥ ".repeat(Math.max(0, lives)).trim();
+        livesLabel.innerText = lives > 0 ? `LIVES ${hearts}` : "LIVES —";
+    }
+
+    // Called when the player is eaten. Consumes a life; if any remain, show the
+    // "X lives left" message box and respawn in the SAME chapter. Otherwise game over.
+    function handlePlayerDeath() {
+        lives--;
+        updateLivesHud();
+        if (animationFrameId) { cancelAnimationFrame(animationFrameId); animationFrameId = null; }
+        if (spawnIntervalId) { clearInterval(spawnIntervalId); spawnIntervalId = null; }
+        sound("boom"); screenShake = 14;
+
+        if (lives <= 0) { terminateGameEngine(false); return; }
+
+        gamePaused = true;
+        const hearts = "♥ ".repeat(lives).trim();
+        lifeLostHearts.innerText = hearts;
+        if (lives === 1) {
+            lifeLostTitle.innerText = "YOU'RE ON YOUR LAST LIFE";
+            lifeLostSub.innerText = "One mistake left — respawning in the same chapter, progress kept!";
+        } else {
+            lifeLostTitle.innerText = `YOU GOT ${lives} LIVES LEFT`;
+            lifeLostSub.innerText = "Respawning in the same chapter — keep your progress!";
+        }
+        lifeLostOverlay.style.display = "flex";
+    }
+
+    // Respawn the player in the current chapter without losing tier progress.
+    function respawnAfterLifeLost() {
+        lifeLostOverlay.style.display = "none";
+        player.x = canvas.width / 2; player.y = canvas.height / 2;
+        player.targetX = player.x; player.targetY = player.y; player.vx = 0; player.vy = 0;
+        marineThreats = []; particles = []; lastTimestamp = null;
+        gamePaused = false;
+        if (spawnIntervalId) clearInterval(spawnIntervalId); spawnIntervalId = setInterval(generateMarineLife, 650);
+        if (animationFrameId) cancelAnimationFrame(animationFrameId); animationFrameId = requestAnimationFrame(runGameLoop);
+    }
+    lifeContinueBtn.addEventListener("click", (e) => { e.stopPropagation(); respawnAfterLifeLost(); });
 
     // Freeze the game and show the "Chapter Completed" message box with a Continue button.
     function showChapterCompleteMenu() {
@@ -1052,6 +1233,13 @@ game_html += r"""
             // Large tier: no threats left, keep feeding edible prey.
             sizeRadius = edibleSizes.length ? edibleSizes[Math.floor(Math.random() * edibleSizes.length)] : FISH_SIZE_CLASSES[0];
         }
+        // Give each fish a little size variety (deeper chapters run slightly larger) while
+        // keeping edible prey strictly below the player and threats at/above the player.
+        const chapterScale = 1 + currentChapter * 0.04;
+        sizeRadius = sizeRadius * chapterScale * (0.9 + Math.random() * 0.2);
+        if (sizeRadius < player.radius) sizeRadius = Math.min(sizeRadius, player.radius - 3);
+        else sizeRadius = Math.max(sizeRadius, player.radius + 2);
+        sizeRadius = Math.max(6, sizeRadius);
         const baseY = Math.random() * (canvas.height - 90) + 45;
         const baseSpeed = (Math.random() * 0.55 + 0.5) * (spawnFromLeft ? 1 : -1);
         marineThreats.push({ x: spawnFromLeft ? -60 : canvas.width + 60, y: baseY, radius: sizeRadius, vx: baseSpeed, vy: 0, fishType: specificType, speciesIdx, wagPhase: Math.random() * 100 });
@@ -1085,7 +1273,7 @@ game_html += r"""
         gameActive = false; gamePaused = false; clearInterval(spawnIntervalId); spawnIntervalId = null; cancelAnimationFrame(animationFrameId); animationFrameId = null;
         pauseOverlay.style.display = "none"; screenOverlay.style.display = "flex";
         if (victory) { sound("level"); overlayTitle.innerText = "👑 APEX OCEAN GOD 👑"; overlayTitle.style.color = "#eab308"; overlaySub.innerText = `Evolution completed safely across all 5 chapters! Final Score: ${score}`; actionBtn.innerText = "RESTART EVOLUTION 🔄"; }
-        else { sound("boom"); screenShake = 14; overlayTitle.innerText = "🐋 CONSUMED 🐋"; overlayTitle.style.color = "#ef4444"; overlaySub.innerText = `You became organic mass in ${CHAPTERS[currentChapter].name}. Final Score: ${score}`; actionBtn.innerText = "REDEPLOY DESCENT 🔄"; }
+        else { sound("boom"); screenShake = 14; overlayTitle.innerText = "GAME OVER"; overlayTitle.style.color = "#ef4444"; overlaySub.innerText = `All 3 lives are gone in ${CHAPTERS[currentChapter].name}. Final Score: ${score}`; actionBtn.innerText = "START NEW GAME 🔄"; }
     }
 
     function runGameLoop(timestamp) {
@@ -1194,7 +1382,7 @@ game_html += r"""
                     } else {
                         updateSizeHud();
                     }
-                } else { terminateGameEngine(false); }
+                } else { ctx.restore(); handlePlayerDeath(); return; }
             }
             if ((t.x > canvas.width + 60 && t.vx > 0) || (t.x < -60 && t.vx < 0)) marineThreats.splice(index, 1);
         }
