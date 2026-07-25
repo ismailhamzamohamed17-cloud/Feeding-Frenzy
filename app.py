@@ -184,16 +184,20 @@ game_html += r"""
     let lives = MAX_LIVES;
 
     // ---- Discrete fish-size progression ----
+    // Player has 4 fixed sizes per chapter: small -> medium -> big -> large.
+    // Eating FISH_PER_TIER edible fish transforms the player to the next size.
+    // Finishing the LARGE tier (eating its full quota) completes the chapter.
     const TIER_RADII = [15, 24, 34, 46];                 // small, medium, big, large
     const TIER_NAMES = ["SMALL", "MEDIUM", "BIG", "LARGE"];
     const FISH_PER_TIER = 10;
+    // Four discrete prey/threat size classes fish are spawned at.
     const FISH_SIZE_CLASSES = [10, 19, 29, 41];
 
     let score = 0, gameActive = false, gamePaused = false, timeTick = 0, lastTimestamp = null;
     let player = { x: 190, y: 240, vx: 0, vy: 0, radius: 15, targetX: 190, targetY: 240, facingLeft: false, tailWag: 0, tiltAngle: 0, tier: 0, eatenThisTier: 0 };
     let marineThreats = []; let environmentBubbles = []; let particles = []; let kelpFronds = [];
     let reefRocks = []; let reefCorals = []; let reefAnemones = [];
-    let driftPlankton = [];
+    // Volumetric god-ray definitions (offset from centre, width, drift speed, base alpha)
     const LIGHT_RAYS = [
         { o: -0.34, w: 0.085, s: 0.0055, a: 0.16 },
         { o: -0.16, w: 0.130, s: 0.0038, a: 0.12 },
@@ -206,67 +210,74 @@ game_html += r"""
     const MAX_FISH_ON_SCREEN = 8;
     const TARGET_PER_SIDE = 3;
 
-    // Bioluminescent reef-fish species palettes — deep, moody body tones with a glowing "hot core"
-    // near the head/gills (the `glow` field) so every fish reads like it's lit from within, matching
-    // a dark abyssal aquarium look. `shape` still drives silhouette + fins + animation per species.
+    // Painterly reef-fish species palettes — banded bodies + eye-mask stripe + bright fin tips, in the
+    // spirit of a real angelfish/butterflyfish rather than a single flat cartoon hue. Expanded roster
+    // so each chapter/biome can draw from its own believable palette pool instead of reusing everything.
+    // Each species now carries a `shape` profile so every fish GROUP has its own distinct
+    // silhouette + fins + animation quirk (not just a colour swap):
+    //   profile  — body outline used by traceFishBody: "disc" | "torpedo" | "tall" | "slim" | "balanced" | "bulb"
+    //   yScale   — vertical body stretch (tall vs slender)
+    //   tail     — caudal fin style: "fan" | "fork" | "flow" (long trailing) | "lunate" (crescent)
+    //   dorsal   — "low" | "sail" (big) | "spiny"
+    //   wag      — tail-beat multiplier (fast darters wag quicker)
+    //   extra    — special feature drawn on top: "finlets" | "lure" | "barbel" | null
     const FISH_SPECIES = [
-        { name: "SEA FISH",       bands: ["#dff2ff", "#3f7fc9", "#0c2a4a"], finColor: "#8fd8ff", maskColor: "#04101f", glow: "94, 190, 255",
-          shape: { profile: "balanced", yScale: 0.82, tail: "fan",    dorsal: "low",   wag: 1.0, extra: null } },
-        { name: "GOLD FISH",      bands: ["#fff0e0", "#f2b23c", "#5a2f0c"], finColor: "#ffb84d", maskColor: "#1c0f04", glow: "255, 176, 96",
-          shape: { profile: "disc",     yScale: 1.05, tail: "flow",   dorsal: "sail",  wag: 0.7, extra: null } },
-        { name: "CLOWN FISH",     bands: ["#ffe0e8", "#ff6f8f", "#5a0c22"], finColor: "#ff9fc0", maskColor: "#160308", glow: "255, 110, 150",
-          shape: { profile: "tall",     yScale: 0.98, tail: "fan",    dorsal: "spiny", wag: 1.1, extra: null } },
-        { name: "SPAR FISH",      bands: ["#efe9ff", "#8f7bff", "#2a1e5c"], finColor: "#c1a8ff", maskColor: "#12082b", glow: "170, 140, 255",
-          shape: { profile: "slim",     yScale: 0.66, tail: "fork",   dorsal: "low",   wag: 1.3, extra: null } },
-        { name: "YELLOWFIN TUNA", bands: ["#e2fff5", "#2f8fc9", "#0c2438"], finColor: "#ffe37a", maskColor: "#051c16", glow: "255, 220, 130",
-          shape: { profile: "torpedo",  yScale: 0.70, tail: "lunate", dorsal: "sail",  wag: 1.5, extra: "finlets" } },
-        { name: "KELP WRASSE",    bands: ["#eafff0", "#5fd1a0", "#0e3d2c"], finColor: "#8effc2", maskColor: "#031f14", glow: "110, 255, 190",
-          shape: { profile: "slim",     yScale: 0.70, tail: "fan",    dorsal: "spiny", wag: 1.15, extra: null } },
-        { name: "SILVER BAITFISH",bands: ["#dff7ff", "#5fc4e8", "#0e3040"], finColor: "#bdf2ff", maskColor: "#031722", glow: "140, 225, 255",
-          shape: { profile: "torpedo",  yScale: 0.64, tail: "fork",   dorsal: "low",   wag: 1.4, extra: null } },
-        { name: "LANTERN FISH",   bands: ["#241c3c", "#4b3a78", "#0c081c"], finColor: "#7de8d8", maskColor: "#040310", glow: "125, 232, 216",
-          shape: { profile: "balanced", yScale: 0.80, tail: "fork",   dorsal: "low",   wag: 1.0, extra: "barbel" } },
-        { name: "ANGLERFISH",     bands: ["#1c1230", "#33205c", "#0a0618"], finColor: "#ff5fb0", maskColor: "#04020a", glow: "255, 95, 176",
-          shape: { profile: "bulb",     yScale: 1.02, tail: "fan",    dorsal: "spiny", wag: 0.8, extra: "lure" } },
+        { name: "SEA FISH",       bands: ["#eaf7ff", "#2f8fd1", "#0d3f6b"], finColor: "#ffcf4d", maskColor: "#0b1a2b",
+          shape: { profile: "balanced", yScale: 0.82, tail: "fan",    dorsal: "low",   wag: 1.0, extra: null } },        // blue tang
+        { name: "GOLD FISH",      bands: ["#fff3d6", "#f2b23c", "#7a4c0c"], finColor: "#ffd873", maskColor: "#241505",
+          shape: { profile: "disc",     yScale: 1.05, tail: "flow",   dorsal: "sail",  wag: 0.7, extra: null } },        // fat round goldfish w/ flowing tail
+        { name: "CLOWN FISH",     bands: ["#ffe7d9", "#ff8a4d", "#96350c"], finColor: "#ffffff", maskColor: "#160a04",
+          shape: { profile: "tall",     yScale: 0.98, tail: "fan",    dorsal: "spiny", wag: 1.1, extra: null } },        // stout tall-bodied clownfish
+        { name: "SPAR FISH",      bands: ["#eee9ff", "#8f7bff", "#33246e"], finColor: "#8be7ff", maskColor: "#140a2b",
+          shape: { profile: "slim",     yScale: 0.66, tail: "fork",   dorsal: "low",   wag: 1.3, extra: null } },        // slender darting spar
+        { name: "YELLOWFIN TUNA", bands: ["#e8fff3", "#2f6fd1", "#0e2a4a"], finColor: "#ffe37a", maskColor: "#06231a",
+          shape: { profile: "torpedo",  yScale: 0.70, tail: "lunate", dorsal: "sail",  wag: 1.5, extra: "finlets" } },   // fast torpedo tuna w/ crescent tail + finlets
+        { name: "KELP WRASSE",    bands: ["#f4ffe8", "#9ad14a", "#3d5c14"], finColor: "#ffb84d", maskColor: "#16240a",
+          shape: { profile: "slim",     yScale: 0.70, tail: "fan",    dorsal: "spiny", wag: 1.15, extra: null } },       // slim wrasse
+        { name: "SILVER BAITFISH",bands: ["#d9f4ff", "#4aa8c9", "#123a4a"], finColor: "#c9f2ff", maskColor: "#04141c",
+          shape: { profile: "torpedo",  yScale: 0.64, tail: "fork",   dorsal: "low",   wag: 1.4, extra: null } },        // quick baitfish
+        { name: "LANTERN FISH",   bands: ["#2a2540", "#4b3a78", "#120f24"], finColor: "#7de8d8", maskColor: "#050414",
+          shape: { profile: "balanced", yScale: 0.80, tail: "fork",   dorsal: "low",   wag: 1.0, extra: "barbel" } },    // deep lantern fish
+        { name: "ANGLERFISH",     bands: ["#1c1230", "#33205c", "#0a0618"], finColor: "#ff5fb0", maskColor: "#04020a",
+          shape: { profile: "bulb",     yScale: 1.02, tail: "fan",    dorsal: "spiny", wag: 0.8, extra: "lure" } },      // round bulbous anglerfish w/ glowing lure
     ];
-    // Player fish: a glowing rose/red bioluminescent centerpiece (matching the reference look) with a
-    // pale white-pink head so the "hot core" glow reads clearly against dark water.
-    const PLAYER_SPECIES = { bands: ["#fff0f0", "#ff6b6b", "#5c0f14"], finColor: "#ff8f9e", maskColor: "#1a0406", glow: "255, 90, 110",
+    const PLAYER_SPECIES = { bands: ["#eafff5", "#10b981", "#04351f"], finColor: "#facc15", maskColor: "#04120b",
           shape: { profile: "balanced", yScale: 0.80, tail: "fork", dorsal: "spiny", wag: 1.0, extra: null } };
 
     /* ---------- 5 chapter maps ----------
-       Darker, more saturated abyssal water than before — brighter/shallower still up top, but every
-       chapter now sits deeper into inky blue-black so the bioluminescent glow effects pop. */
+       As the player grows, the game descends through 5 distinct biomes: brighter/shallower to
+       darker/deeper, each with its own water colour, light strength, coral palette, fish pool and
+       background "cast" (schooling fish, jellyfish, cruising megafauna, a landmark silhouette). */
     const CHAPTERS = [
         {
             name: "CORAL SHALLOWS", minRadius: 0,
-            sky: ["#052032", "#02121f", "#000810"], fog: "1, 12, 20", rayStrength: 0.9,
+            sky: ["#0a3a52", "#062338", "#01131f"], fog: "2, 24, 34", rayStrength: 1.15,
             coralAmberBias: 0.5, speciesPool: [0, 1, 2, 3, 4], kelpDensity: 0.4,
-            schoolCount: 3, jellyfishCount: 2, megafauna: "turtle", megafaunaChance: 0.55, landmark: "none",
+            schoolCount: 3, jellyfishCount: 0, megafauna: "turtle", megafaunaChance: 0.55, landmark: "none",
         },
         {
             name: "KELP FOREST", minRadius: 23,
-            sky: ["#051f1c", "#031714", "#00080a"], fog: "2, 18, 16", rayStrength: 0.7,
+            sky: ["#0a3a2e", "#062a24", "#010f14"], fog: "3, 30, 26", rayStrength: 0.95,
             coralAmberBias: 0.3, speciesPool: [0, 4, 5, 3, 1], kelpDensity: 1.6,
-            schoolCount: 5, jellyfishCount: 3, megafauna: "turtle", megafaunaChance: 0.4, landmark: "none",
+            schoolCount: 5, jellyfishCount: 1, megafauna: "turtle", megafaunaChance: 0.4, landmark: "none",
         },
         {
             name: "ROCKY DROP-OFF", minRadius: 32,
-            sky: ["#071b2e", "#04101f", "#00050c"], fog: "2, 12, 22", rayStrength: 0.55,
+            sky: ["#0c2e4a", "#071b30", "#010a16"], fog: "3, 20, 32", rayStrength: 0.75,
             coralAmberBias: 0.35, speciesPool: [6, 0, 3, 5, 2], kelpDensity: 0.7,
-            schoolCount: 6, jellyfishCount: 4, megafauna: "ray", megafaunaChance: 0.5, landmark: "shipwreck",
+            schoolCount: 6, jellyfishCount: 2, megafauna: "ray", megafaunaChance: 0.5, landmark: "shipwreck",
         },
         {
             name: "TWILIGHT TRENCH", minRadius: 42,
-            sky: ["#0c0924", "#070718", "#01010a"], fog: "4, 6, 20", rayStrength: 0.3,
+            sky: ["#141034", "#0a0a24", "#030312"], fog: "6, 10, 30", rayStrength: 0.4,
             coralAmberBias: 0.15, speciesPool: [7, 6, 3, 8], kelpDensity: 0.25,
-            schoolCount: 4, jellyfishCount: 6, megafauna: "ray", megafaunaChance: 0.35, landmark: "shipwreck",
+            schoolCount: 4, jellyfishCount: 4, megafauna: "ray", megafaunaChance: 0.35, landmark: "shipwreck",
         },
         {
             name: "ABYSSAL DEEP", minRadius: 52,
-            sky: ["#070414", "#03020c", "#000003"], fog: "6, 2, 16", rayStrength: 0.1,
+            sky: ["#0a0620", "#050312", "#000006"], fog: "10, 4, 24", rayStrength: 0.15,
             coralAmberBias: 0.05, speciesPool: [7, 8], kelpDensity: 0.05,
-            schoolCount: 2, jellyfishCount: 8, megafauna: "none", megafaunaChance: 0, landmark: "ruins",
+            schoolCount: 2, jellyfishCount: 6, megafauna: "none", megafaunaChance: 0, landmark: "ruins",
         },
     ];
     const WIN_RADIUS = 65;
@@ -281,7 +292,6 @@ game_html += r"""
         player.targetX = player.x; player.targetY = player.y;
         regenerateKelp();
         regenerateReef();
-        regeneratePlankton();
     }
     function regenerateKelp() {
         kelpFronds = [];
@@ -291,21 +301,9 @@ game_html += r"""
             kelpFronds.push({ x: Math.random() * canvas.width, height: 70 + Math.random() * 110, sway: Math.random() * 12, phase: Math.random() * 100 });
         }
     }
-    // Fine drifting plankton / marine-snow specks — the tiny glinting dust visible throughout the
-    // reference image. Purely decorative, drawn as soft additive dots.
-    function regeneratePlankton() {
-        driftPlankton = [];
-        const count = Math.max(30, Math.round((canvas.width * canvas.height) / 9000));
-        for (let i = 0; i < count; i++) {
-            driftPlankton.push({
-                x: Math.random() * canvas.width, y: Math.random() * canvas.height,
-                r: 0.5 + Math.random() * 1.4, phase: Math.random() * 100,
-                speed: 0.03 + Math.random() * 0.06, drift: (Math.random() - 0.5) * 0.04,
-            });
-        }
-    }
 
-    /* ---------- Procedural coral reef: rocks, branching/fan/tube corals, glowing anemones ---------- */
+    /* ---------- Procedural coral reef: rocks, branching/fan/tube corals, glowing anemones ----------
+       Geometry is baked once per resize so the reef never flickers and the per-frame cost is just strokes. */
     function makeCoralBranches(height, spread) {
         const segs = [];
         (function grow(x, y, ang, len, wid, depth) {
@@ -341,7 +339,7 @@ game_html += r"""
             reefCorals.push({
                 x: Math.random() * w,
                 height,
-                depth: 0.35 + Math.random() * 0.65,
+                depth: 0.35 + Math.random() * 0.65,             // 1 = foreground, small = hazier/further
                 kind: kind < 0.45 ? "branch" : (kind < 0.75 ? "fan" : "tube"),
                 segs: kind < 0.45 ? makeCoralBranches(height, 0.55 + Math.random() * 0.3) : null,
                 tubes: Array.from({ length: 4 + Math.floor(Math.random() * 4) }, () => ({
@@ -365,6 +363,8 @@ game_html += r"""
         regenerateSchoolFish(); regenerateJellyfish(); regenerateMegafauna(); regenerateLandmark();
     }
 
+    /* ---------- Ambient background life: schooling fish, jellyfish, cruising megafauna, landmarks ----------
+       These never collide with the player — they're pure atmosphere that makes each chapter feel alive. */
     function regenerateSchoolFish() {
         schoolFish = [];
         const theme = CHAPTERS[currentChapter] || CHAPTERS[0];
@@ -386,8 +386,8 @@ game_html += r"""
         for (let j = 0; j < theme.jellyfishCount; j++) {
             jellyfish.push({
                 x: Math.random() * canvas.width, y: canvas.height * (0.1 + Math.random() * 0.75),
-                size: 14 + Math.random() * 22, phase: Math.random() * 100, driftSpeed: 0.08 + Math.random() * 0.1,
-                hue: Math.random() < 0.5 ? "196, 130, 255" : "255, 120, 210",
+                size: 14 + Math.random() * 20, phase: Math.random() * 100, driftSpeed: 0.08 + Math.random() * 0.1,
+                hue: Math.random() < 0.5 ? "180, 240, 255" : "255, 130, 220",
             });
         }
     }
@@ -418,6 +418,7 @@ game_html += r"""
         else if (type === "boom") { osc.type = "sawtooth"; osc.frequency.setValueAtTime(90, audioCtx.currentTime); osc.frequency.exponentialRampToValueAtTime(15, audioCtx.currentTime + 0.4); gain.gain.setValueAtTime(0.6, audioCtx.currentTime); osc.start(); osc.stop(audioCtx.currentTime + 0.4); }
         else if (type === "level") { osc.type = "sine"; osc.frequency.setValueAtTime(440, audioCtx.currentTime); osc.frequency.setValueAtTime(554.37, audioCtx.currentTime + 0.08); osc.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.16); gain.gain.setValueAtTime(0.2, audioCtx.currentTime); osc.start(); osc.stop(audioCtx.currentTime + 0.35); }
         else if (type === "crunch") {
+            // Classic "feeding frenzy" bite: a short filtered noise burst (the crunch) layered over a low thump (the weight of the bite)
             osc.disconnect(); gain.disconnect();
             const now = audioCtx.currentTime;
             const bufferSize = Math.floor(audioCtx.sampleRate * 0.14);
@@ -483,12 +484,14 @@ game_html += r"""
         if (!gameActive || !gamePaused) return;
         gamePaused = false;
         pauseOverlay.style.display = "none";
+        // Snap the follow target to the fish so it doesn't lurch on resume
         player.targetX = player.x; player.targetY = player.y;
         lastTimestamp = null;
         if (!spawnIntervalId) spawnIntervalId = setInterval(generateMarineLife, 650);
         if (!animationFrameId) animationFrameId = requestAnimationFrame(runGameLoop);
     }
     function togglePause() {
+        // Ignore pause/resume while a modal message box (chapter-complete or life-lost) is open.
         if (chapterCompleteOverlay.style.display === "flex") return;
         if (lifeLostOverlay.style.display === "flex") return;
         gamePaused ? resumeGame() : pauseGame();
@@ -522,17 +525,18 @@ game_html += r"""
         const k = e.key.toLowerCase();
         if (k === "escape" || k === "p") { if (gameActive) { e.preventDefault(); togglePause(); } }
     });
+    // Auto-pause if the player tabs away mid-dive
     document.addEventListener("visibilitychange", () => { if (document.hidden) pauseGame(); });
 """
 # Part D: True fish-silhouette rendering — tapered body with snout + peduncle, scales, gills, pectoral fin
-# Now with a bioluminescent glow pass so every fish reads as lit-from-within against dark water.
 game_html += r"""
     /* ---------- Volumetric lighting: soft god-rays fading into dark water ---------- */
     function drawVolumetricLight(pulse) {
         const h = canvas.height, w = canvas.width;
+        // surface shimmer band
         let surf = ctx.createLinearGradient(0, 0, 0, h * 0.3);
-        surf.addColorStop(0, `rgba(120, 190, 220, ${0.10 + pulse * 2})`);
-        surf.addColorStop(1, "rgba(4, 20, 40, 0)");
+        surf.addColorStop(0, `rgba(150, 231, 233, ${0.14 + pulse * 2})`);
+        surf.addColorStop(1, "rgba(6, 40, 60, 0)");
         ctx.fillStyle = surf; ctx.fillRect(0, 0, w, h * 0.3);
 
         ctx.save();
@@ -545,10 +549,10 @@ game_html += r"""
             const skew = w * 0.09 + Math.sin(timeTick * ray.s * 1.6 + i) * w * 0.025;
             const alpha = ray.a + pulse * 1.2;
             let g = ctx.createLinearGradient(0, 0, 0, h * 0.95);
-            g.addColorStop(0, `rgba(150, 200, 230, ${alpha * 0.6})`);
-            g.addColorStop(0.35, `rgba(80, 130, 190, ${alpha * 0.3})`);
-            g.addColorStop(0.72, `rgba(30, 60, 110, ${alpha * 0.1})`);
-            g.addColorStop(1, "rgba(10, 20, 60, 0)");
+            g.addColorStop(0, `rgba(196, 244, 245, ${alpha})`);
+            g.addColorStop(0.35, `rgba(94, 214, 199, ${alpha * 0.45})`);
+            g.addColorStop(0.72, `rgba(30, 140, 150, ${alpha * 0.16})`);
+            g.addColorStop(1, "rgba(10, 60, 80, 0)");
             ctx.fillStyle = g;
             ctx.beginPath();
             ctx.moveTo(topX - rw * 0.5, -20); ctx.lineTo(topX + rw * 0.5, -20);
@@ -568,13 +572,15 @@ game_html += r"""
         const w = canvas.width, h = canvas.height;
         const floorY = h + 6;
 
+        // sediment bed
         let bed = ctx.createLinearGradient(0, h - 120, 0, h);
-        bed.addColorStop(0, "rgba(1, 10, 18, 0)"); bed.addColorStop(1, "rgba(2, 14, 20, 0.9)");
+        bed.addColorStop(0, "rgba(3, 24, 34, 0)"); bed.addColorStop(1, "rgba(4, 30, 38, 0.85)");
         ctx.fillStyle = bed; ctx.fillRect(0, h - 120, w, 120);
 
+        // rock mounds, hazier the further back they sit
         reefRocks.forEach(rk => {
             const fade = 0.3 + rk.depth * 0.45;
-            ctx.fillStyle = `rgba(2, ${Math.round(14 + rk.depth * 12)}, ${Math.round(20 + rk.depth * 14)}, ${fade})`;
+            ctx.fillStyle = `rgba(4, ${Math.round(26 + rk.depth * 18)}, ${Math.round(34 + rk.depth * 20)}, ${fade})`;
             ctx.beginPath(); ctx.moveTo(rk.x - rk.rw, floorY);
             for (let b = 0; b <= rk.bumps; b++) {
                 const t0 = b / rk.bumps, t1 = (b + 0.5) / rk.bumps, t2 = (b + 1) / rk.bumps;
@@ -587,12 +593,13 @@ game_html += r"""
             ctx.lineTo(rk.x + rk.rw, floorY); ctx.closePath(); ctx.fill();
         });
 
+        // corals
         reefCorals.forEach(c => {
             const sway = Math.sin(timeTick * 0.012 + c.phase) * (3 + c.height * 0.03);
             ctx.save();
             ctx.translate(c.x, floorY);
-            ctx.globalAlpha = 0.32 + c.depth * 0.45;
-            const body = reefTint(c.hue, 0.28 + c.depth * 0.35);
+            ctx.globalAlpha = 0.35 + c.depth * 0.5;
+            const body = reefTint(c.hue, 0.35 + c.depth * 0.4);
 
             if (c.kind === "branch") {
                 ctx.strokeStyle = body; ctx.lineCap = "round";
@@ -603,21 +610,24 @@ game_html += r"""
                     ctx.lineTo(s.x2 + sway * (-s.y2 / c.height) * 0.6, s.y2);
                     ctx.stroke();
                 });
-                ctx.fillStyle = c.hue === "amber" ? "rgba(250, 204, 21, 0.45)" : "rgba(94, 234, 212, 0.5)";
+                // luminous polyp tips
+                ctx.fillStyle = c.hue === "amber" ? "rgba(250, 204, 21, 0.5)" : "rgba(52, 211, 153, 0.5)";
                 c.segs.filter(s => s.tip).forEach(s => {
                     ctx.beginPath(); ctx.arc(s.x2 + sway * (-s.y2 / c.height) * 0.6, s.y2, Math.max(1.2, s.w * 0.7), 0, Math.PI * 2); ctx.fill();
                 });
             } else if (c.kind === "fan") {
+                // wide, flat sea fan (broader than tall) rather than a balloon shape
                 const fh = c.height * 0.8, fw = c.height * 1.15;
                 let fg = ctx.createLinearGradient(0, 0, 0, -fh);
-                fg.addColorStop(0, body); fg.addColorStop(1, c.hue === "amber" ? "rgba(150, 92, 34, 0.14)" : "rgba(38, 160, 145, 0.14)");
+                fg.addColorStop(0, body); fg.addColorStop(1, c.hue === "amber" ? "rgba(150, 92, 34, 0.16)" : "rgba(38, 160, 145, 0.16)");
                 ctx.fillStyle = fg; ctx.globalAlpha *= 0.7;
                 ctx.beginPath(); ctx.moveTo(0, 0);
                 ctx.quadraticCurveTo(-fw * 0.55 + sway * 0.6, -fh * 0.35, -fw * 0.5 + sway, -fh * 0.92);
                 ctx.quadraticCurveTo(0 + sway, -fh * 1.05, fw * 0.5 + sway, -fh * 0.92);
                 ctx.quadraticCurveTo(fw * 0.55 + sway * 0.6, -fh * 0.35, 0, 0);
                 ctx.closePath(); ctx.fill();
-                ctx.strokeStyle = c.hue === "amber" ? "rgba(250, 204, 21, 0.14)" : "rgba(190, 245, 240, 0.14)"; ctx.lineWidth = 1;
+                // fan lattice ribs
+                ctx.strokeStyle = c.hue === "amber" ? "rgba(250, 204, 21, 0.16)" : "rgba(190, 245, 240, 0.16)"; ctx.lineWidth = 1;
                 for (let i = -4; i <= 4; i++) {
                     ctx.beginPath(); ctx.moveTo(0, 0);
                     ctx.quadraticCurveTo(i * fw * 0.09 + sway * 0.5, -fh * 0.5, i * fw * 0.115 + sway, -fh * 0.9); ctx.stroke();
@@ -629,7 +639,7 @@ game_html += r"""
                     const lean = t.dx * 0.35;
                     ctx.beginPath(); ctx.moveTo(t.dx, 0);
                     ctx.quadraticCurveTo(t.dx + lean * 0.5 + sway * 0.4, -t.len * 0.65, t.dx + lean + sway, -t.len); ctx.stroke();
-                    ctx.fillStyle = c.hue === "amber" ? "rgba(250, 204, 21, 0.25)" : "rgba(94, 234, 212, 0.28)";
+                    ctx.fillStyle = c.hue === "amber" ? "rgba(250, 204, 21, 0.28)" : "rgba(52, 211, 153, 0.28)";
                     ctx.beginPath(); ctx.ellipse(t.dx + lean + sway, -t.len, t.wid * 0.6, t.wid * 0.35, 0, 0, Math.PI * 2); ctx.fill();
                     void i;
                 });
@@ -642,46 +652,34 @@ game_html += r"""
     function drawAnemones() {
         const floorY = canvas.height + 4;
         reefAnemones.forEach(a => {
-            const rgb = a.hue === "amber" ? "250, 204, 21" : "94, 234, 212";
+            const rgb = a.hue === "amber" ? "250, 204, 21" : "52, 211, 153";
             const pulse = 0.55 + Math.sin(timeTick * 0.03 + a.phase) * 0.25;
             ctx.save();
             ctx.translate(a.x, floorY - a.lift);
             ctx.globalCompositeOperation = "lighter";
             let glow = ctx.createRadialGradient(0, 0, 1, 0, 0, a.base * 2.4);
-            glow.addColorStop(0, `rgba(${rgb}, ${0.18 * pulse})`); glow.addColorStop(1, `rgba(${rgb}, 0)`);
+            glow.addColorStop(0, `rgba(${rgb}, ${0.16 * pulse})`); glow.addColorStop(1, `rgba(${rgb}, 0)`);
             ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(0, 0, a.base * 2.4, 0, Math.PI * 2); ctx.fill();
 
+            // soft curling tentacles — short, rounded and splayed outward, not a starburst
             ctx.lineCap = "round";
             for (let i = 0; i < a.tentacles; i++) {
                 const spread = (i / (a.tentacles - 1) - 0.5) * Math.PI * 0.9;
                 const wave = Math.sin(timeTick * 0.04 + a.phase + i * 0.7) * a.base * 0.22;
                 const ex = Math.sin(spread) * a.base * 1.05 + wave;
                 const ey = -a.base * (0.35 + Math.cos(spread) * 0.45);
-                ctx.strokeStyle = `rgba(${rgb}, ${0.32 * pulse})`; ctx.lineWidth = Math.max(1.6, a.base * 0.14);
+                ctx.strokeStyle = `rgba(${rgb}, ${0.3 * pulse})`; ctx.lineWidth = Math.max(1.6, a.base * 0.14);
                 ctx.beginPath(); ctx.moveTo(0, a.lift * 0.35);
                 ctx.quadraticCurveTo(ex * 0.45, ey * 1.15, ex, ey);
                 ctx.stroke();
-                ctx.fillStyle = `rgba(${rgb}, ${0.36 * pulse})`;
+                ctx.fillStyle = `rgba(${rgb}, ${0.34 * pulse})`;
                 ctx.beginPath(); ctx.arc(ex, ey, Math.max(1.1, a.base * 0.1), 0, Math.PI * 2); ctx.fill();
             }
             ctx.globalCompositeOperation = "source-over";
-            ctx.fillStyle = `rgba(2, 16, 22, 0.9)`; ctx.beginPath();
+            ctx.fillStyle = `rgba(4, 30, 38, 0.9)`; ctx.beginPath();
             ctx.ellipse(0, a.lift * 0.5, a.base * 0.55, a.base * 0.4, 0, 0, Math.PI * 2); ctx.fill();
             ctx.restore();
         });
-    }
-
-    /* ---------- Fine drifting plankton / marine snow ---------- */
-    function drawPlankton(dt) {
-        ctx.save(); ctx.globalCompositeOperation = "lighter";
-        driftPlankton.forEach(p => {
-            p.y -= p.speed * dt; p.x += p.drift * dt;
-            if (p.y < -5) p.y = canvas.height + 5; if (p.x < -5) p.x = canvas.width + 5; if (p.x > canvas.width + 5) p.x = -5;
-            const tw = 0.35 + 0.4 * Math.sin(timeTick * 0.03 + p.phase);
-            ctx.fillStyle = `rgba(190, 220, 255, ${Math.max(0.05, tw)})`;
-            ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
-        });
-        ctx.restore();
     }
 
     /* ---------- Lightweight background schooling fish (pure atmosphere, no collision) ---------- */
@@ -695,13 +693,7 @@ game_html += r"""
                 const mx = school.x + m.ox, my = school.y + m.oy + bob;
                 const wag = Math.sin(timeTick * 0.15 + m.phase) * school.radius * 0.5;
                 ctx.save();
-                ctx.globalCompositeOperation = "lighter";
-                ctx.globalAlpha = 0.35;
-                let sg = ctx.createRadialGradient(mx, my, 0, mx, my, school.radius * 3);
-                sg.addColorStop(0, `rgba(${species.glow}, 0.5)`); sg.addColorStop(1, `rgba(${species.glow}, 0)`);
-                ctx.fillStyle = sg; ctx.beginPath(); ctx.arc(mx, my, school.radius * 3, 0, Math.PI * 2); ctx.fill();
-                ctx.globalCompositeOperation = "source-over";
-                ctx.globalAlpha = 0.6;
+                ctx.globalAlpha = 0.55;
                 ctx.translate(mx, my);
                 if (school.vx < 0) ctx.scale(-1, 1);
                 ctx.fillStyle = species.bands[1];
@@ -728,14 +720,14 @@ game_html += r"""
             ctx.save();
             ctx.translate(j.x, j.y);
             ctx.globalCompositeOperation = "lighter";
-            let glow = ctx.createRadialGradient(0, 0, 1, 0, 0, j.size * 2.6);
-            glow.addColorStop(0, `rgba(${j.hue}, ${0.30 * pulse})`); glow.addColorStop(1, `rgba(${j.hue}, 0)`);
-            ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(0, 0, j.size * 2.6, 0, Math.PI * 2); ctx.fill();
+            let glow = ctx.createRadialGradient(0, 0, 1, 0, 0, j.size * 2.2);
+            glow.addColorStop(0, `rgba(${j.hue}, ${0.22 * pulse})`); glow.addColorStop(1, `rgba(${j.hue}, 0)`);
+            ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(0, 0, j.size * 2.2, 0, Math.PI * 2); ctx.fill();
 
             const bellSquash = 1 + Math.sin(j.phase * 2) * 0.18;
-            ctx.fillStyle = `rgba(${j.hue}, ${0.5 * pulse})`;
+            ctx.fillStyle = `rgba(${j.hue}, ${0.45 * pulse})`;
             ctx.beginPath(); ctx.ellipse(0, 0, j.size * 0.7, j.size * 0.55 * bellSquash, 0, Math.PI, 0); ctx.fill();
-            ctx.strokeStyle = `rgba(${j.hue}, ${0.34 * pulse})`; ctx.lineWidth = Math.max(1, j.size * 0.05); ctx.lineCap = "round";
+            ctx.strokeStyle = `rgba(${j.hue}, ${0.3 * pulse})`; ctx.lineWidth = Math.max(1, j.size * 0.05); ctx.lineCap = "round";
             for (let t = -3; t <= 3; t++) {
                 const sway = Math.sin(j.phase * 1.6 + t) * j.size * 0.25;
                 ctx.beginPath(); ctx.moveTo(t * j.size * 0.16, j.size * 0.05);
@@ -757,23 +749,23 @@ game_html += r"""
         ctx.save();
         ctx.translate(m.x, m.y);
         if (m.vx < 0) ctx.scale(-1, 1);
-        ctx.globalAlpha = 0.42;
+        ctx.globalAlpha = 0.5;
         if (m.kind === "ray") {
             const flap = Math.sin(m.phase * 4) * m.size * 0.28;
-            ctx.fillStyle = "#1a222e";
+            ctx.fillStyle = "#2b3a4a";
             ctx.beginPath();
             ctx.moveTo(m.size * 1.1, 0);
             ctx.quadraticCurveTo(m.size * 0.3, -m.size * 0.5 + flap, -m.size * 0.9, -m.size * 0.15);
             ctx.quadraticCurveTo(-m.size * 0.4, 0, -m.size * 0.9, m.size * 0.15);
             ctx.quadraticCurveTo(m.size * 0.3, m.size * 0.5 - flap, m.size * 1.1, 0);
             ctx.closePath(); ctx.fill();
-            ctx.strokeStyle = "rgba(148,163,184,0.3)"; ctx.lineWidth = 2;
+            ctx.strokeStyle = "rgba(148,163,184,0.4)"; ctx.lineWidth = 2;
             ctx.beginPath(); ctx.moveTo(-m.size * 0.85, 0); ctx.lineTo(-m.size * 1.6, m.size * 0.35); ctx.stroke();
         } else if (m.kind === "turtle") {
             const paddle = Math.sin(m.phase * 3) * 0.35;
-            ctx.fillStyle = "#233a26";
+            ctx.fillStyle = "#3a5a3f";
             ctx.beginPath(); ctx.ellipse(0, 0, m.size * 0.62, m.size * 0.46, 0, 0, Math.PI * 2); ctx.fill();
-            ctx.strokeStyle = "rgba(4,14,8,0.4)"; ctx.lineWidth = 1.4;
+            ctx.strokeStyle = "rgba(6,20,10,0.4)"; ctx.lineWidth = 1.4;
             for (let i = -1; i <= 1; i++) { ctx.beginPath(); ctx.moveTo(i * m.size * 0.24, -m.size * 0.4); ctx.lineTo(i * m.size * 0.24, m.size * 0.4); ctx.stroke(); }
             ctx.beginPath(); ctx.ellipse(m.size * 0.72, 0, m.size * 0.2, m.size * 0.14, 0, 0, Math.PI * 2); ctx.fill();
             ctx.save(); ctx.rotate(paddle * 0.5);
@@ -790,12 +782,12 @@ game_html += r"""
     function drawLandmark() {
         if (!landmarkDecor) return;
         const floorY = canvas.height + 4; const s = landmarkDecor.scale;
-        ctx.save(); ctx.translate(landmarkDecor.x, floorY); ctx.scale(s, s); ctx.globalAlpha = 0.45;
-        ctx.fillStyle = "#050b12";
+        ctx.save(); ctx.translate(landmarkDecor.x, floorY); ctx.scale(s, s); ctx.globalAlpha = 0.5;
+        ctx.fillStyle = "#0b1520";
         if (landmarkDecor.kind === "shipwreck") {
             ctx.beginPath();
             ctx.moveTo(-140, 0); ctx.lineTo(120, 0); ctx.lineTo(90, -46); ctx.lineTo(-40, -58); ctx.lineTo(-120, -34); ctx.closePath(); ctx.fill();
-            ctx.strokeStyle = "rgba(148,163,184,0.2)"; ctx.lineWidth = 2;
+            ctx.strokeStyle = "rgba(148,163,184,0.25)"; ctx.lineWidth = 2;
             ctx.beginPath(); ctx.moveTo(-10, -58); ctx.lineTo(-10, -140); ctx.moveTo(-10, -110); ctx.lineTo(46, -96); ctx.stroke();
             for (let i = -100; i < 100; i += 26) { ctx.beginPath(); ctx.moveTo(i, -6); ctx.lineTo(i + 14, -34); ctx.stroke(); }
         } else if (landmarkDecor.kind === "ruins") {
@@ -809,16 +801,6 @@ game_html += r"""
         ctx.restore();
     }
 
-    // Bioluminescent halo drawn around every fish (not just threats) — a soft radial glow using the
-    // species' own glow color, plus an extra hot inner core near the head for that "lit from within" look.
-    function drawBioGlow(r, glowRgb, intensity) {
-        const outer = r * 2.3;
-        let g = ctx.createRadialGradient(r * 0.15, 0, r * 0.3, 0, 0, outer);
-        g.addColorStop(0, `rgba(${glowRgb}, ${0.32 * intensity})`);
-        g.addColorStop(0.4, `rgba(${glowRgb}, ${0.14 * intensity})`);
-        g.addColorStop(1, `rgba(${glowRgb}, 0)`);
-        ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(0, 0, outer * 1.1, outer * 0.8, 0, 0, Math.PI * 2); ctx.fill();
-    }
     function drawAura(r, colorRgb, strong) {
         const outer = strong ? r * 1.5 : r * 1.3;
         const peakAlpha = strong ? 0.4 : 0.22;
@@ -826,13 +808,13 @@ game_html += r"""
         g.addColorStop(0, `rgba(${colorRgb}, ${peakAlpha})`); g.addColorStop(1, `rgba(${colorRgb}, 0)`);
         ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(0, 0, outer * 1.12, outer * 0.82, 0, 0, Math.PI * 2); ctx.fill();
     }
-"""
-game_html += r"""
+
     // Real fish outline: pointed snout at +x, full mid-body, tapering down to a narrow tail peduncle at -x.
+    // `profile` reshapes the silhouette per species so each group reads as a different fish.
     function traceFishBody(r, profile) {
         ctx.beginPath();
         switch (profile) {
-            case "disc":
+            case "disc": // fat round goldfish — deep belly, high rounded back, short body
                 ctx.moveTo(r * 1.02, r * 0.10);
                 ctx.bezierCurveTo(r * 0.78, -r * 0.70, r * 0.26, -r * 1.12, -r * 0.18, -r * 1.02);
                 ctx.bezierCurveTo(-r * 0.50, -r * 0.94, -r * 0.78, -r * 0.60, -r * 0.92, -r * 0.22);
@@ -840,7 +822,7 @@ game_html += r"""
                 ctx.bezierCurveTo(-r * 0.74, r * 0.70, -r * 0.44, r * 1.12, r * 0.06, r * 1.10);
                 ctx.bezierCurveTo(r * 0.54, r * 1.06, r * 0.86, r * 0.60, r * 1.02, r * 0.10);
                 break;
-            case "tall":
+            case "tall": // clownfish / butterflyfish — very deep, laterally compressed body
                 ctx.moveTo(r * 1.06, r * 0.08);
                 ctx.bezierCurveTo(r * 0.80, -r * 0.78, r * 0.30, -r * 1.16, -r * 0.10, -r * 1.10);
                 ctx.bezierCurveTo(-r * 0.48, -r * 1.04, -r * 0.76, -r * 0.60, -r * 0.94, -r * 0.20);
@@ -848,7 +830,7 @@ game_html += r"""
                 ctx.bezierCurveTo(-r * 0.72, r * 0.62, -r * 0.40, r * 1.14, r * 0.06, r * 1.12);
                 ctx.bezierCurveTo(r * 0.56, r * 1.10, r * 0.90, r * 0.62, r * 1.06, r * 0.08);
                 break;
-            case "torpedo":
+            case "torpedo": // tuna / baitfish — long, sleek, narrow spindle
                 ctx.moveTo(r * 1.22, r * 0.04);
                 ctx.bezierCurveTo(r * 0.90, -r * 0.34, r * 0.30, -r * 0.72, -r * 0.20, -r * 0.70);
                 ctx.bezierCurveTo(-r * 0.56, -r * 0.68, -r * 0.82, -r * 0.44, -r * 1.02, -r * 0.14);
@@ -856,7 +838,7 @@ game_html += r"""
                 ctx.bezierCurveTo(-r * 0.80, r * 0.46, -r * 0.50, r * 0.70, r * 0.06, r * 0.72);
                 ctx.bezierCurveTo(r * 0.58, r * 0.74, r * 0.96, r * 0.42, r * 1.22, r * 0.04);
                 break;
-            case "slim":
+            case "slim": // spar / wrasse — trim, moderately slender
                 ctx.moveTo(r * 1.14, r * 0.05);
                 ctx.bezierCurveTo(r * 0.86, -r * 0.40, r * 0.40, -r * 0.74, -r * 0.10, -r * 0.72);
                 ctx.bezierCurveTo(-r * 0.48, -r * 0.70, -r * 0.76, -r * 0.48, -r * 0.98, -r * 0.16);
@@ -864,7 +846,7 @@ game_html += r"""
                 ctx.bezierCurveTo(-r * 0.74, r * 0.50, -r * 0.42, r * 0.74, r * 0.06, r * 0.76);
                 ctx.bezierCurveTo(r * 0.56, r * 0.78, r * 0.92, r * 0.44, r * 1.14, r * 0.05);
                 break;
-            case "bulb":
+            case "bulb": // anglerfish — huge blunt head, tapering fast to a small tail
                 ctx.moveTo(r * 1.14, r * 0.28);
                 ctx.bezierCurveTo(r * 1.02, -r * 0.60, r * 0.50, -r * 1.06, -r * 0.02, -r * 0.96);
                 ctx.bezierCurveTo(-r * 0.44, -r * 0.88, -r * 0.74, -r * 0.52, -r * 0.94, -r * 0.18);
@@ -872,7 +854,7 @@ game_html += r"""
                 ctx.bezierCurveTo(-r * 0.72, r * 0.54, -r * 0.40, r * 0.92, r * 0.10, r * 1.00);
                 ctx.bezierCurveTo(r * 0.62, r * 1.06, r * 1.04, r * 0.86, r * 1.14, r * 0.28);
                 break;
-            default:
+            default: // "balanced" — the original generic reef fish
                 ctx.moveTo(r * 1.10, r * 0.06);
                 ctx.bezierCurveTo(r * 0.86, -r * 0.44, r * 0.42, -r * 0.92, -r * 0.06, -r * 0.90);
                 ctx.bezierCurveTo(-r * 0.44, -r * 0.88, -r * 0.72, -r * 0.58, -r * 0.94, -r * 0.20);
@@ -887,54 +869,52 @@ game_html += r"""
         ctx.save(); ctx.translate(x, y); ctx.scale(depthScale, depthScale); if (isLeft) ctx.scale(-1, 1);
         ctx.rotate(Math.max(-0.3, Math.min(0.3, tiltAngle)) * (isLeft ? -1 : 1));
 
-        // Bioluminescent halo — every fish glows with its own species color; threats/edibles get an
-        // extra colored ring layered on top so the gameplay signal still reads clearly.
-        if (species && species.glow) {
-            ctx.save(); ctx.globalCompositeOperation = "lighter";
-            drawBioGlow(r, species.glow, 1);
-            ctx.restore();
-        }
         if (auraColorRgb) drawAura(r, auraColorRgb, auraColorRgb === "239, 68, 68");
 
+        // Per-species shape profile drives silhouette, fins and swim animation.
         const shape = (species && species.shape) ? species.shape : { profile: "balanced", yScale: 0.80, tail: "fan", dorsal: "low", wag: 1.0, extra: null };
 
         const wagSpeed = (0.1 + Math.min(0.28, speedMag * 0.2)) * shape.wag;
         const wag = Math.sin(pulseTick * wagSpeed) * (r * (0.2 + Math.min(0.15, speedMag * 0.1)));
         const tailWag = Math.sin(pulseTick * wagSpeed + 0.6) * (r * 0.34);
+        // body depth comes from the species profile now (tall/disc = deep, torpedo/slim = slender)
         const bodyYScale = shape.yScale;
 
-        ctx.save(); ctx.globalAlpha = 0.16; ctx.fillStyle = "#000208"; ctx.beginPath(); ctx.ellipse(r * 0.05, r * (0.95 * bodyYScale + 0.35), r * 0.95, r * 0.22, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+        // contact shadow (depth cue)
+        ctx.save(); ctx.globalAlpha = 0.16; ctx.fillStyle = "#000814"; ctx.beginPath(); ctx.ellipse(r * 0.05, r * (0.95 * bodyYScale + 0.35), r * 0.95, r * 0.22, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();
 
-        const tx = -r * 0.92;
+        // ---- caudal (tail) fin: forked, swept, translucent membrane with ray lines ----
+        const tx = -r * 0.92; // peduncle attach point
         let tailGrd = ctx.createLinearGradient(tx, 0, -r * 2.2, 0);
         tailGrd.addColorStop(0, species.bands[2]); tailGrd.addColorStop(0.55, species.bands[1]); tailGrd.addColorStop(1, species.finColor);
         ctx.fillStyle = tailGrd; ctx.globalAlpha = 0.9;
         ctx.beginPath();
-        if (shape.tail === "fork") {
+        if (shape.tail === "fork") { // deep V fork (fast swimmer)
             ctx.moveTo(tx, -r * 0.12 * bodyYScale);
             ctx.quadraticCurveTo(-r * 1.5, -r * 0.95 + tailWag, -r * 2.15, -r * 1.05 + tailWag);
             ctx.quadraticCurveTo(-r * 1.42, -r * 0.16 + tailWag * 0.7, -r * 1.30, tailWag * 0.6);
             ctx.quadraticCurveTo(-r * 1.42, r * 0.16 + tailWag * 0.7, -r * 2.15, r * 1.05 + tailWag);
             ctx.quadraticCurveTo(-r * 1.5, r * 0.95 + tailWag, tx, r * 0.12 * bodyYScale);
-        } else if (shape.tail === "lunate") {
+        } else if (shape.tail === "lunate") { // crescent/sickle tail (tuna) — narrow tips, tight centre
             ctx.moveTo(tx, -r * 0.10 * bodyYScale);
             ctx.quadraticCurveTo(-r * 1.7, -r * 1.02 + tailWag, -r * 2.35, -r * 1.16 + tailWag);
             ctx.quadraticCurveTo(-r * 1.9, -r * 0.4 + tailWag, -r * 1.28, tailWag * 0.5);
             ctx.quadraticCurveTo(-r * 1.9, r * 0.4 + tailWag, -r * 2.35, r * 1.16 + tailWag);
             ctx.quadraticCurveTo(-r * 1.7, r * 1.02 + tailWag, tx, r * 0.10 * bodyYScale);
-        } else if (shape.tail === "flow") {
+        } else if (shape.tail === "flow") { // long flowing double tail (goldfish) — soft, veil-like
             ctx.moveTo(tx, -r * 0.16 * bodyYScale);
             ctx.quadraticCurveTo(-r * 1.7, -r * 1.35 + tailWag * 1.3, -r * 2.35, -r * 0.55 + tailWag * 1.5);
             ctx.quadraticCurveTo(-r * 1.55, -r * 0.25 + tailWag, -r * 1.4, tailWag * 0.8);
             ctx.quadraticCurveTo(-r * 1.55, r * 0.25 + tailWag, -r * 2.35, r * 0.55 + tailWag * 1.5);
             ctx.quadraticCurveTo(-r * 1.7, r * 1.35 + tailWag * 1.3, tx, r * 0.16 * bodyYScale);
-        } else {
+        } else { // "fan" / rounded caudal
             ctx.moveTo(tx, -r * 0.14 * bodyYScale);
             ctx.quadraticCurveTo(-r * 1.45, -r * 0.78 + tailWag, -r * 1.95, -r * 0.72 + tailWag);
             ctx.quadraticCurveTo(-r * 1.55, tailWag * 0.9, -r * 1.95, r * 0.72 + tailWag);
             ctx.quadraticCurveTo(-r * 1.45, r * 0.78 + tailWag, tx, r * 0.14 * bodyYScale);
         }
         ctx.closePath(); ctx.fill();
+        // fin rays
         ctx.strokeStyle = "rgba(255,255,255,0.28)"; ctx.lineWidth = Math.max(0.6, r * 0.035); ctx.globalAlpha = 0.55;
         for (let i = -2; i <= 2; i++) {
             ctx.beginPath(); ctx.moveTo(tx, 0);
@@ -943,6 +923,7 @@ game_html += r"""
         }
         ctx.globalAlpha = 1;
 
+        // ---- dorsal fin: spiny ridge along the back; "sail" species get a tall raised fin ----
         const dorsalH = shape.dorsal === "sail" ? 1.95 : (shape.dorsal === "spiny" ? 1.55 : 1.45);
         let dorsalGrd = ctx.createLinearGradient(0, -r * bodyYScale * 0.85, 0, -r * bodyYScale * (dorsalH + 0.3));
         dorsalGrd.addColorStop(0, species.bands[1]); dorsalGrd.addColorStop(1, species.finColor);
@@ -953,6 +934,7 @@ game_html += r"""
         ctx.quadraticCurveTo(r * 0.34, -r * (0.98 * bodyYScale), r * 0.42, -r * (0.72 * bodyYScale));
         ctx.quadraticCurveTo(-r * 0.10, -r * (0.86 * bodyYScale), -r * 0.72, -r * 0.55 * bodyYScale);
         ctx.closePath(); ctx.fill();
+        // spiny rays for "spiny" dorsals (clownfish / anglerfish / wrasse)
         if (shape.dorsal === "spiny") {
             ctx.strokeStyle = "rgba(255,255,255,0.30)"; ctx.lineWidth = Math.max(0.5, r * 0.03);
             for (let i = 0; i <= 4; i++) {
@@ -963,6 +945,7 @@ game_html += r"""
         }
         ctx.globalAlpha = 1;
 
+        // ---- anal fin (underside, rear) ----
         ctx.fillStyle = species.finColor; ctx.globalAlpha = 0.8;
         ctx.beginPath();
         ctx.moveTo(-r * 0.62, r * 0.52 * bodyYScale);
@@ -970,6 +953,7 @@ game_html += r"""
         ctx.quadraticCurveTo(-r * 0.28, r * (0.80 * bodyYScale), -r * 0.62, r * 0.52 * bodyYScale);
         ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
 
+        // ---- body: clip to the fish silhouette, then paint bands, scales and volume shading ----
         ctx.save();
         ctx.scale(1, bodyYScale);
         ctx.save();
@@ -980,14 +964,16 @@ game_html += r"""
         ctx.beginPath(); ctx.moveTo(-r * 0.18, -r * 1.3); ctx.lineTo(r * 0.22, -r * 1.3); ctx.lineTo(-r * 0.08, r * 1.3); ctx.lineTo(-r * 0.48, r * 1.3); ctx.closePath(); ctx.fill();
         ctx.fillStyle = species.bands[2];
         ctx.beginPath(); ctx.moveTo(r * 0.30, -r * 1.3); ctx.lineTo(r * 0.64, -r * 1.3); ctx.lineTo(r * 0.38, r * 1.3); ctx.lineTo(r * 0.04, r * 1.3); ctx.closePath(); ctx.fill();
+        // tail-end darkening toward the peduncle
         let pedGrd = ctx.createLinearGradient(-r * 0.45, 0, -r * 1.0, 0);
-        pedGrd.addColorStop(0, "rgba(0,0,0,0)"); pedGrd.addColorStop(1, "rgba(1,3,10,0.55)");
+        pedGrd.addColorStop(0, "rgba(0,0,0,0)"); pedGrd.addColorStop(1, "rgba(2,6,14,0.45)");
         ctx.fillStyle = pedGrd; ctx.fillRect(-r * 1.3, -r * 1.3, r * 1.3, r * 2.6);
 
+        // scale rows — embossed overlapping arcs (dark crease + light catch) for a real scaled texture
         const scaleStep = Math.max(3.2, r * 0.24);
         ctx.lineWidth = Math.max(0.5, r * 0.028);
         for (let pass = 0; pass < 2; pass++) {
-            ctx.strokeStyle = pass === 0 ? "rgba(1,4,12,0.28)" : "rgba(255,255,255,0.20)";
+            ctx.strokeStyle = pass === 0 ? "rgba(2,8,18,0.22)" : "rgba(255,255,255,0.22)";
             const shift = pass === 0 ? scaleStep * 0.12 : 0;
             for (let sy = -r * 0.9; sy < r * 0.9; sy += scaleStep) {
                 for (let sx = -r * 0.9; sx < r * 1.0; sx += scaleStep) {
@@ -996,42 +982,44 @@ game_html += r"""
                 }
             }
         }
-        ctx.strokeStyle = "rgba(0,0,0,0.22)"; ctx.lineWidth = Math.max(0.6, r * 0.04);
+        // lateral line
+        ctx.strokeStyle = "rgba(0,0,0,0.20)"; ctx.lineWidth = Math.max(0.6, r * 0.04);
         ctx.beginPath(); ctx.moveTo(r * 0.72, -r * 0.06); ctx.quadraticCurveTo(0, r * 0.10, -r * 0.88, r * 0.02); ctx.stroke();
 
+        // eye-mask stripe — the dark diagonal band real reef fish wear through the eye
         ctx.save(); ctx.globalAlpha = 0.85; ctx.fillStyle = species.maskColor;
         ctx.beginPath(); ctx.moveTo(r * 0.62, -r * 1.3); ctx.lineTo(r * 0.82, -r * 1.3); ctx.lineTo(r * 0.50, r * 1.3); ctx.lineTo(r * 0.30, r * 1.3); ctx.closePath(); ctx.fill(); ctx.restore();
 
-        ctx.strokeStyle = "rgba(1,4,10,0.4)"; ctx.lineWidth = Math.max(0.8, r * 0.055);
+        // gill plate (operculum) crease
+        ctx.strokeStyle = "rgba(2,10,20,0.35)"; ctx.lineWidth = Math.max(0.8, r * 0.055);
         ctx.beginPath(); ctx.moveTo(r * 0.30, -r * 0.66); ctx.quadraticCurveTo(r * 0.10, 0, r * 0.34, r * 0.62); ctx.stroke();
 
+        // volume shading: rim light on the back, ambient occlusion on the belly
         let shadeGrd = ctx.createRadialGradient(r * 0.25, -r * 0.42, r * 0.08, 0, 0, r * 1.25);
-        shadeGrd.addColorStop(0, "rgba(255,255,255,0.85)"); shadeGrd.addColorStop(0.45, "rgba(255,255,255,0.16)"); shadeGrd.addColorStop(1, "rgba(4,6,16,0.7)");
+        shadeGrd.addColorStop(0, "rgba(255,255,255,0.85)"); shadeGrd.addColorStop(0.45, "rgba(255,255,255,0.16)"); shadeGrd.addColorStop(1, "rgba(8,12,24,0.6)");
         ctx.globalCompositeOperation = "multiply"; ctx.fillStyle = shadeGrd; ctx.fillRect(-r * 1.3, -r * 1.3, r * 2.7, r * 2.6);
         ctx.globalCompositeOperation = "source-over";
+        // pale countershaded belly (real fish are light underneath)
         let bellyGrd = ctx.createLinearGradient(0, r * 0.2, 0, r * 1.0);
-        bellyGrd.addColorStop(0, "rgba(255,255,255,0)"); bellyGrd.addColorStop(1, "rgba(255,255,255,0.30)");
+        bellyGrd.addColorStop(0, "rgba(255,255,255,0)"); bellyGrd.addColorStop(1, "rgba(255,255,255,0.34)");
         ctx.fillStyle = bellyGrd; ctx.fillRect(-r * 1.3, 0, r * 2.7, r * 1.3);
 
-        // Bioluminescent "hot core" near the head/gill — the signature glow-from-within look.
+        // ---- premium 3D pass: layered radial sheens + specular hotspots ----
         ctx.globalCompositeOperation = "screen";
-        let core = ctx.createRadialGradient(r * 0.32, -r * 0.05, 0, r * 0.32, -r * 0.05, r * 0.85);
-        core.addColorStop(0, `rgba(${species.glow || "255,255,255"}, 0.55)`);
-        core.addColorStop(0.5, `rgba(${species.glow || "255,255,255"}, 0.18)`);
-        core.addColorStop(1, `rgba(${species.glow || "255,255,255"}, 0)`);
-        ctx.fillStyle = core; ctx.fillRect(-r * 1.3, -r * 1.3, r * 2.7, r * 2.6);
-
+        // broad wet sheen wrapping the upper flank
         let sheen = ctx.createRadialGradient(r * 0.34, -r * 0.5, r * 0.04, r * 0.05, -r * 0.05, r * 1.3);
-        sheen.addColorStop(0, "rgba(226, 250, 255, 0.45)");
-        sheen.addColorStop(0.34, "rgba(140, 210, 235, 0.16)");
+        sheen.addColorStop(0, "rgba(226, 250, 255, 0.5)");
+        sheen.addColorStop(0.34, "rgba(140, 210, 235, 0.18)");
         sheen.addColorStop(1, "rgba(120, 190, 220, 0)");
         ctx.fillStyle = sheen; ctx.fillRect(-r * 1.3, -r * 1.3, r * 2.7, r * 2.6);
+        // secondary iridescent bounce light from the water below
         let bounce = ctx.createRadialGradient(-r * 0.25, r * 0.6, r * 0.03, -r * 0.2, r * 0.55, r * 1.0);
-        bounce.addColorStop(0, `rgba(${species.glow || "94,234,212"}, 0.22)`);
-        bounce.addColorStop(1, `rgba(${species.glow || "94,234,212"}, 0)`);
+        bounce.addColorStop(0, "rgba(94, 234, 212, 0.28)");
+        bounce.addColorStop(1, "rgba(94, 234, 212, 0)");
         ctx.fillStyle = bounce; ctx.fillRect(-r * 1.3, -r * 1.3, r * 2.7, r * 2.6);
         ctx.globalCompositeOperation = "source-over";
 
+        // tight specular hotspot (the glossy 3D "kick") plus a smaller snout highlight
         let spec = ctx.createRadialGradient(r * 0.4, -r * 0.44, 0, r * 0.4, -r * 0.44, r * 0.52);
         spec.addColorStop(0, "rgba(255,255,255,0.9)"); spec.addColorStop(0.45, "rgba(255,255,255,0.22)"); spec.addColorStop(1, "rgba(255,255,255,0)");
         ctx.fillStyle = spec; ctx.beginPath(); ctx.ellipse(r * 0.4, -r * 0.42, r * 0.5, r * 0.26, -0.35, 0, Math.PI * 2); ctx.fill();
@@ -1039,6 +1027,7 @@ game_html += r"""
         spec2.addColorStop(0, "rgba(255,255,255,0.6)"); spec2.addColorStop(1, "rgba(255,255,255,0)");
         ctx.fillStyle = spec2; ctx.beginPath(); ctx.ellipse(r * 0.86, -r * 0.1, r * 0.24, r * 0.16, 0, 0, Math.PI * 2); ctx.fill();
 
+        // wet scale sparkle — a couple of tiny twinkling glints that drift across the flank as it swims
         ctx.globalCompositeOperation = "lighter";
         for (let sp = 0; sp < 3; sp++) {
             const twinkle = 0.4 + 0.6 * Math.max(0, Math.sin(pulseTick * 0.18 + sp * 2.4));
@@ -1050,15 +1039,17 @@ game_html += r"""
         }
         ctx.globalCompositeOperation = "source-over";
 
-        ctx.restore();
+        ctx.restore(); // drop clip
 
+        // silhouette edge: dark outline + top rim highlight so the shape reads clearly underwater
         traceFishBody(r, shape.profile);
-        ctx.strokeStyle = "rgba(1,3,10,0.6)"; ctx.lineWidth = Math.max(1, r * 0.06); ctx.stroke();
+        ctx.strokeStyle = "rgba(1,6,14,0.55)"; ctx.lineWidth = Math.max(1, r * 0.06); ctx.stroke();
         ctx.save(); ctx.clip();
-        ctx.strokeStyle = `rgba(${species.glow || "255,255,255"}, 0.5)`; ctx.lineWidth = Math.max(1, r * 0.10);
+        ctx.strokeStyle = "rgba(255,255,255,0.45)"; ctx.lineWidth = Math.max(1, r * 0.10);
         ctx.beginPath(); ctx.moveTo(r * 0.92, -r * 0.30); ctx.bezierCurveTo(r * 0.45, -r * 0.92, -r * 0.10, -r * 0.95, -r * 0.60, -r * 0.62); ctx.stroke();
         ctx.restore();
 
+        // pectoral fin — sits on the flank, above the body edge, semi-transparent
         ctx.save();
         ctx.globalAlpha = 0.62; ctx.fillStyle = species.finColor;
         const pecWag = Math.sin(pulseTick * (wagSpeed + 0.06)) * (r * 0.16);
@@ -1070,11 +1061,13 @@ game_html += r"""
         ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = Math.max(0.5, r * 0.03); ctx.stroke();
         ctx.restore();
 
-        ctx.strokeStyle = "rgba(1,4,10,0.65)"; ctx.lineWidth = Math.max(0.8, r * 0.05);
+        // mouth line at the snout
+        ctx.strokeStyle = "rgba(2,8,16,0.6)"; ctx.lineWidth = Math.max(0.8, r * 0.05);
         ctx.beginPath(); ctx.moveTo(r * 1.06, r * 0.10); ctx.quadraticCurveTo(r * 0.90, r * 0.20, r * 0.78, r * 0.16); ctx.stroke();
 
-        ctx.restore();
+        ctx.restore(); // undo bodyYScale
 
+        // eye — drawn after the y-scale is undone so it stays perfectly round
         let eyeX = r * 0.66; let eyeY = -r * 0.28 * bodyYScale; let eyeRadius = Math.max(2.5, r * 0.17);
         ctx.fillStyle = "rgba(255,255,255,0.7)"; ctx.beginPath(); ctx.arc(eyeX, eyeY, eyeRadius * 1.18, 0, Math.PI * 2); ctx.fill();
         let eyeGrd = ctx.createRadialGradient(eyeX - eyeRadius * 0.2, eyeY - eyeRadius * 0.2, 1, eyeX, eyeY, eyeRadius);
@@ -1083,7 +1076,9 @@ game_html += r"""
         ctx.fillStyle = "#020617"; ctx.beginPath(); ctx.arc(eyeX + eyeRadius * 0.12, eyeY, eyeRadius * 0.52, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(eyeX + eyeRadius * 0.34, eyeY - eyeRadius * 0.24, eyeRadius * 0.17, 0, Math.PI * 2); ctx.fill();
 
+        // ---- species-specific extras ----
         if (shape.extra === "finlets") {
+            // small yellow finlets running along the top/bottom of the tuna's tail stalk
             ctx.fillStyle = species.finColor; ctx.globalAlpha = 0.85;
             for (let i = 0; i < 4; i++) {
                 const fx = -r * 0.5 - i * r * 0.16;
@@ -1092,6 +1087,7 @@ game_html += r"""
             }
             ctx.globalAlpha = 1;
         } else if (shape.extra === "lure") {
+            // anglerfish illicium (stalk) + glowing bulb bobbing in front of the head
             const bob = Math.sin(pulseTick * 0.09) * r * 0.12;
             const bx = r * 1.15, by = -r * 0.95 * bodyYScale + bob;
             ctx.strokeStyle = "rgba(220,220,235,0.6)"; ctx.lineWidth = Math.max(1, r * 0.06);
@@ -1101,6 +1097,7 @@ game_html += r"""
             ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(bx, by, r * 0.45, 0, Math.PI * 2); ctx.fill();
             ctx.fillStyle = "#fff6d6"; ctx.beginPath(); ctx.arc(bx, by, Math.max(1.5, r * 0.11), 0, Math.PI * 2); ctx.fill();
         } else if (shape.extra === "barbel") {
+            // pair of thin chin barbels trailing from the snout
             ctx.strokeStyle = "rgba(200,220,225,0.5)"; ctx.lineWidth = Math.max(0.6, r * 0.03);
             const bw = Math.sin(pulseTick * 0.12) * r * 0.1;
             ctx.beginPath(); ctx.moveTo(r * 1.02, r * 0.18); ctx.quadraticCurveTo(r * 1.4, r * 0.4 + bw, r * 1.55, r * 0.7 + bw); ctx.stroke();
@@ -1121,7 +1118,7 @@ game_html += r"""
         player.tier = 0; player.eatenThisTier = 0; player.radius = TIER_RADII[0];
         player.x = canvas.width / 2; player.y = canvas.height / 2; player.targetX = player.x; player.targetY = player.y; player.vx = 0; player.vy = 0;
         marineThreats = []; environmentBubbles = []; particles = []; screenShake = 0; lastTimestamp = null;
-        currentChapter = 0; regenerateKelp(); regenerateReef(); regeneratePlankton();
+        currentChapter = 0; regenerateKelp(); regenerateReef();
         screenOverlay.style.display = "none"; pauseOverlay.style.display = "none"; titleScreen.style.display = "none"; chapterCompleteOverlay.style.display = "none"; lifeLostOverlay.style.display = "none"; hud.style.display = "flex";
         chapterLabel.style.display = "block";
         scoreLabel.innerText = "SCORE: 00000"; updateSizeHud(); updateLivesHud();
@@ -1130,15 +1127,19 @@ game_html += r"""
         if (animationFrameId) cancelAnimationFrame(animationFrameId); animationFrameId = requestAnimationFrame(runGameLoop);
     }
 
+    // HUD now shows the player's current size tier and progress toward the next transform.
     function updateSizeHud() {
         sizeLabel.innerText = `SIZE: ${TIER_NAMES[player.tier]}  ${player.eatenThisTier}/${FISH_PER_TIER}`;
     }
 
+    // Render the remaining lives as hearts in the top-right HUD.
     function updateLivesHud() {
         const hearts = "♥ ".repeat(Math.max(0, lives)).trim();
         livesLabel.innerText = lives > 0 ? `LIVES ${hearts}` : "LIVES —";
     }
 
+    // Called when the player is eaten. Consumes a life; if any remain, show the
+    // "X lives left" message box and respawn in the SAME chapter. Otherwise game over.
     function handlePlayerDeath() {
         lives--;
         updateLivesHud();
@@ -1161,6 +1162,7 @@ game_html += r"""
         lifeLostOverlay.style.display = "flex";
     }
 
+    // Respawn the player in the current chapter without losing tier progress.
     function respawnAfterLifeLost() {
         lifeLostOverlay.style.display = "none";
         player.x = canvas.width / 2; player.y = canvas.height / 2;
@@ -1172,6 +1174,7 @@ game_html += r"""
     }
     lifeContinueBtn.addEventListener("click", (e) => { e.stopPropagation(); respawnAfterLifeLost(); });
 
+    // Freeze the game and show the "Chapter Completed" message box with a Continue button.
     function showChapterCompleteMenu() {
         if (animationFrameId) { cancelAnimationFrame(animationFrameId); animationFrameId = null; }
         if (spawnIntervalId) { clearInterval(spawnIntervalId); spawnIntervalId = null; }
@@ -1186,6 +1189,7 @@ game_html += r"""
         sound("level");
     }
 
+    // Advance to the next chapter (or win), resetting the player back to the SMALL size tier.
     function continueToNextChapter() {
         chapterCompleteOverlay.style.display = "none";
         if (currentChapter >= CHAPTERS.length - 1) { terminateGameEngine(true); return; }
@@ -1202,6 +1206,8 @@ game_html += r"""
     }
     continueBtn.addEventListener("click", (e) => { e.stopPropagation(); continueToNextChapter(); });
 
+    // Keeps roughly 3 edible + 3 not-yet-edible fish on screen at once, hard-capped at 8 total —
+    // spawns one at a time so the screen never gets flooded in a single burst.
     function generateMarineLife() {
         if (!gameActive || gamePaused) return;
         if (marineThreats.length >= MAX_FISH_ON_SCREEN) return;
@@ -1215,6 +1221,7 @@ game_html += r"""
         const pool = (CHAPTERS[currentChapter] || CHAPTERS[0]).speciesPool;
         const speciesIdx = pool[Math.floor(Math.random() * pool.length)];
         const specificType = Math.floor(Math.random() * 3) + 1;
+        // Pick a discrete size class that is edible (smaller) or a threat (>= player) as needed.
         const edibleSizes = FISH_SIZE_CLASSES.filter(s => s < player.radius);
         const threatSizes = FISH_SIZE_CLASSES.filter(s => s >= player.radius);
         let sizeRadius;
@@ -1223,8 +1230,11 @@ game_html += r"""
         } else if (threatSizes.length) {
             sizeRadius = threatSizes[Math.floor(Math.random() * threatSizes.length)];
         } else {
+            // Large tier: no threats left, keep feeding edible prey.
             sizeRadius = edibleSizes.length ? edibleSizes[Math.floor(Math.random() * edibleSizes.length)] : FISH_SIZE_CLASSES[0];
         }
+        // Give each fish a little size variety (deeper chapters run slightly larger) while
+        // keeping edible prey strictly below the player and threats at/above the player.
         const chapterScale = 1 + currentChapter * 0.04;
         sizeRadius = sizeRadius * chapterScale * (0.9 + Math.random() * 0.2);
         if (sizeRadius < player.radius) sizeRadius = Math.min(sizeRadius, player.radius - 3);
@@ -1282,32 +1292,34 @@ game_html += r"""
 
         const causticPulse = (0.015 + Math.sin(timeTick * 0.02) * 0.008) * theme.rayStrength;
         const midX = canvas.width / 2;
+        // Volumetric god-rays replace the old hard caustic wedges (same centre-line drift variables)
         drawVolumetricLight(causticPulse);
         void midX;
 
+        // Distant background cast (megafauna + far schools) drawn before the reef so foreground reads on top
         drawMegafauna(dt);
         drawSchoolFish(dt);
 
+        // Reef silhouettes sit behind the kelp; depth fog pushes them back into the dark water
         drawCoralReef();
         drawLandmark();
         let depthFog = ctx.createLinearGradient(0, canvas.height * 0.55, 0, canvas.height);
-        depthFog.addColorStop(0, `rgba(${theme.fog}, 0)`); depthFog.addColorStop(1, `rgba(${theme.fog}, 0.6)`);
+        depthFog.addColorStop(0, `rgba(${theme.fog}, 0)`); depthFog.addColorStop(1, `rgba(${theme.fog}, 0.55)`);
         ctx.fillStyle = depthFog; ctx.fillRect(0, canvas.height * 0.55, canvas.width, canvas.height * 0.45);
 
         kelpFronds.forEach(k => {
             const sway = Math.sin(timeTick * 0.015 + k.phase) * k.sway;
-            ctx.strokeStyle = "rgba(4, 50, 40, 0.4)"; ctx.lineWidth = 6; ctx.beginPath();
+            ctx.strokeStyle = "rgba(6, 78, 59, 0.35)"; ctx.lineWidth = 6; ctx.beginPath();
             ctx.moveTo(k.x, canvas.height); ctx.quadraticCurveTo(k.x + sway, canvas.height - k.height * 0.5, k.x + sway * 1.6, canvas.height - k.height); ctx.stroke();
         });
 
         drawAnemones();
         drawJellyfish(dt);
-        drawPlankton(dt);
 
         if (chapterBannerTimer > 0) { chapterBannerTimer -= dt; if (chapterBannerTimer <= 0) chapterBanner.classList.remove("show"); }
 
         if (Math.random() < 0.06 * dt) environmentBubbles.push({ x: Math.random() * canvas.width, y: canvas.height + 20, r: Math.random() * 2.5 + 1, speed: Math.random() * 0.8 + 0.4, drift: (Math.random() - 0.5) * 0.4 });
-        environmentBubbles.forEach((b, i) => { b.y -= b.speed * dt; b.x += b.drift * dt; ctx.fillStyle = "rgba(140, 200, 220, 0.14)"; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); if (b.y < -10) environmentBubbles.splice(i, 1); });
+        environmentBubbles.forEach((b, i) => { b.y -= b.speed * dt; b.x += b.drift * dt; ctx.fillStyle = "rgba(52, 211, 153, 0.12)"; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); if (b.y < -10) environmentBubbles.splice(i, 1); });
 
         particles.forEach((p, i) => {
             p.x += p.vx * dt; p.y += p.vy * dt; p.life -= 0.04 * dt;
@@ -1315,6 +1327,7 @@ game_html += r"""
             ctx.fillStyle = `hsla(${p.hue}, 90%, 65%, ${p.life})`; ctx.beginPath(); ctx.arc(p.x, p.y, 2.5 * p.life, 0, Math.PI * 2); ctx.fill();
         });
 
+        // Player physics — same momentum feel, tuned to a normal/quicker pace
         let dx = player.targetX - player.x; let dy = player.targetY - player.y; let dist = Math.hypot(dx, dy);
         const maxSpeed = 2.1 + player.radius * 0.016;
         const desiredSpeed = Math.min(dist * 0.085, maxSpeed);
@@ -1336,7 +1349,7 @@ game_html += r"""
             const t = marineThreats[index];
             t.x += t.vx * dt; t.wagPhase += dt;
             const isTargetEdible = t.radius < player.radius;
-            const auraColor = isTargetEdible ? "94, 255, 170" : "255, 80, 80";
+            const auraColor = isTargetEdible ? "74, 222, 128" : "239, 68, 68";
             const tSpeedMag = Math.abs(t.vx);
             const tDepth = 0.85 + (t.y / canvas.height) * 0.3;
             drawRealisticFish(t.x, t.y, t.radius, t.vx < 0, FISH_SPECIES[t.speciesIdx], t.fishType, t.wagPhase, tSpeedMag, 0, tDepth, auraColor);
@@ -1351,6 +1364,7 @@ game_html += r"""
 
                     if (player.eatenThisTier >= FISH_PER_TIER) {
                         if (player.tier < TIER_RADII.length - 1) {
+                            // Transform to the next size (small -> medium -> big -> large)
                             player.tier++;
                             player.eatenThisTier = 0;
                             player.radius = TIER_RADII[player.tier];
@@ -1358,6 +1372,7 @@ game_html += r"""
                             sound("level");
                             updateSizeHud();
                         } else {
+                            // Finished the LARGE tier — chapter cleared.
                             player.eatenThisTier = FISH_PER_TIER;
                             updateSizeHud();
                             showChapterCompleteMenu();
