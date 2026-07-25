@@ -38,6 +38,7 @@ game_html = r"""
         #pauseBtn:hover { background: rgba(16, 185, 129, 0.22); }
         #pauseBtn:active { transform: scale(0.92); }
         #pauseBtn svg { width: 16px; height: 16px; display: block; }
+        #zoneBanner { position: absolute; top: max(64px, calc(env(safe-area-inset-top) + 50px)); left: 50%; transform: translateX(-50%); padding: 10px 18px; border-radius: 999px; background: rgba(2, 18, 28, 0.68); color: #d7fffb; border: 1px solid rgba(125, 211, 252, 0.28); font-size: 12px; letter-spacing: 3px; z-index: 16; opacity: 0; pointer-events: none; transition: opacity 0.25s ease; text-shadow: 0 0 12px rgba(125, 211, 252, 0.35); }
 
         #loadingScreen { position: absolute; inset: 0; background: radial-gradient(circle at 50% 40%, #062338, #010509); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 40; color: #cbd5e1; }
         #loadingBarTrack { width: 240px; height: 10px; border-radius: 6px; background: rgba(255,255,255,0.08); overflow: hidden; margin-top: 22px; border: 1px solid rgba(52,211,153,0.35); }
@@ -86,8 +87,12 @@ game_html += r"""
                 </button>
                 <div id="scoreLabel">SCORE: 00000</div>
             </div>
-            <div id="sizeLabel">RANK: MINNOW (15)</div>
+            <div>
+                <div id="sizeLabel">RANK: MINNOW (15)</div>
+                <div id="mapLabel" style="font-size:11px; color:#a7f3d0; margin-top:4px;">ZONE: SUNLIT REEF</div>
+            </div>
         </div>
+        <div id="zoneBanner">ENTERING SUNLIT REEF</div>
 
         <div id="loadingScreen">
             <div id="loadingLabel">DESCENDING INTO THE DEEP</div>
@@ -124,7 +129,8 @@ game_html += r"""
 <script>
     const canvas = document.getElementById("aquariumCanvas"); const ctx = canvas.getContext("2d");
     const container = document.getElementById("gameContainer"); const hud = document.getElementById("hud");
-    const scoreLabel = document.getElementById("scoreLabel"); const sizeLabel = document.getElementById("sizeLabel");
+    const scoreLabel = document.getElementById("scoreLabel"); const sizeLabel = document.getElementById("sizeLabel"); const mapLabel = document.getElementById("mapLabel");
+    const zoneBanner = document.getElementById("zoneBanner");
     const screenOverlay = document.getElementById("screenOverlay"); const overlayTitle = document.getElementById("overlayTitle"); const overlaySub = document.getElementById("overlaySub"); const actionBtn = document.getElementById("actionBtn");
     const loadingScreen = document.getElementById("loadingScreen"); const loadingBarFill = document.getElementById("loadingBarFill"); const loadingPercent = document.getElementById("loadingPercent");
     const titleScreen = document.getElementById("titleScreen");
@@ -133,9 +139,10 @@ game_html += r"""
     const overlayExitBtn = document.getElementById("overlayExitBtn");
 
     let score = 0, gameActive = false, gamePaused = false, timeTick = 0, lastTimestamp = null;
-    let player = { x: 190, y: 240, vx: 0, vy: 0, radius: 15, targetX: 190, targetY: 240, facingLeft: false, tailWag: 0, tiltAngle: 0 };
+    let player = { x: 190, y: 240, vx: 0, vy: 0, radius: 15, targetX: 190, targetY: 240, facingLeft: false, tailWag: 0, tiltAngle: 0, eatTimer: 0 };
     let marineThreats = []; let environmentBubbles = []; let particles = []; let kelpFronds = [];
-    let reefRocks = []; let reefCorals = []; let reefAnemones = [];
+    let reefRocks = []; let reefCorals = []; let reefAnemones = []; let ambientSchools = []; let driftingJellies = []; let glowMotes = []; let ventEmbers = [];
+    let currentMapIndex = 0; let zoneBannerTimer = 0;
     // Volumetric god-ray definitions (offset from centre, width, drift speed, base alpha)
     const LIGHT_RAYS = [
         { o: -0.34, w: 0.085, s: 0.0055, a: 0.16 },
@@ -146,8 +153,15 @@ game_html += r"""
     ];
     let animationFrameId = null, spawnIntervalId = null, audioCtx = null;
     let screenShake = 0;
-    const MAX_FISH_ON_SCREEN = 8;
+    const MAX_FISH_ON_SCREEN = 9;
     const TARGET_PER_SIDE = 3;
+    const MAP_THEMES = [
+        { name: "SUNLIT REEF", threshold: 0, bgTop: "#041628", bgMid: "#020f1c", bgBottom: "#01050d", kelp: "#064e3b", fog: "rgba(125,211,252,0.05)", coralA: "#34d399", coralB: "#f59e0b", fishTypes: [1, 2, 3] },
+        { name: "KELP FOREST", threshold: 900, bgTop: "#102f2c", bgMid: "#0a1918", bgBottom: "#04090a", kelp: "#166534", fog: "rgba(74,222,128,0.06)", coralA: "#22c55e", coralB: "#84cc16", fishTypes: [2, 3, 4] },
+        { name: "JELLY BLOOM", threshold: 2200, bgTop: "#26164b", bgMid: "#140a28", bgBottom: "#05040d", kelp: "#6d28d9", fog: "rgba(216,180,254,0.07)", coralA: "#c084fc", coralB: "#f472b6", fishTypes: [1, 4, 5] },
+        { name: "ABYSSAL TRENCH", threshold: 4300, bgTop: "#061225", bgMid: "#020612", bgBottom: "#000103", kelp: "#0f766e", fog: "rgba(56,189,248,0.06)", coralA: "#38bdf8", coralB: "#1d4ed8", fishTypes: [2, 4, 5] },
+        { name: "VOLCANIC VENTS", threshold: 7600, bgTop: "#2a0c0c", bgMid: "#140606", bgBottom: "#050101", kelp: "#b45309", fog: "rgba(248,113,113,0.06)", coralA: "#f97316", coralB: "#ef4444", fishTypes: [3, 4, 5] }
+    ];
 
     // Painterly reef-fish species palettes — banded bodies + eye-mask stripe + bright fin tips, in the
     // spirit of a real angelfish/butterflyfish rather than a single flat cartoon hue.
@@ -159,6 +173,43 @@ game_html += r"""
         { bands: ["#e8fff3", "#33c48a", "#0e4a32"], finColor: "#ffe37a", maskColor: "#06231a" },
     ];
     const PLAYER_SPECIES = { bands: ["#eafff5", "#10b981", "#04351f"], finColor: "#facc15", maskColor: "#04120b" };
+    function getCurrentTheme() { return MAP_THEMES[currentMapIndex]; }
+    function getThemeIndexForScore(nextScore) {
+        let idx = 0;
+        for (let i = 0; i < MAP_THEMES.length; i++) if (nextScore >= MAP_THEMES[i].threshold) idx = i;
+        return idx;
+    }
+    function triggerZoneBanner(name) {
+        zoneBanner.innerText = `ENTERING ${name}`;
+        zoneBanner.style.opacity = "1";
+        zoneBannerTimer = 120;
+    }
+    function syncTheme(forceBanner = false) {
+        const nextIndex = getThemeIndexForScore(score);
+        if (nextIndex !== currentMapIndex || forceBanner) {
+            currentMapIndex = nextIndex;
+            mapLabel.innerText = `ZONE: ${getCurrentTheme().name}`;
+            regenerateKelp();
+            regenerateReef();
+            regenerateAmbientLife();
+            if (forceBanner || gameActive) triggerZoneBanner(getCurrentTheme().name);
+        }
+    }
+    function regenerateAmbientLife() {
+        ambientSchools = []; driftingJellies = []; glowMotes = []; ventEmbers = [];
+        const theme = getCurrentTheme();
+        const schoolCount = Math.max(2, Math.floor(canvas.width / 380));
+        for (let i = 0; i < schoolCount; i++) ambientSchools.push({ x: Math.random() * canvas.width, y: 80 + Math.random() * canvas.height * 0.55, dir: Math.random() > 0.5 ? 1 : -1, speed: 0.12 + Math.random() * 0.22, spread: 35 + Math.random() * 60, count: 8 + Math.floor(Math.random() * 12), scale: 0.7 + Math.random() * 0.8 });
+        if (theme.name === "JELLY BLOOM") {
+            for (let i = 0; i < Math.max(6, Math.floor(canvas.width / 180)); i++) driftingJellies.push({ x: Math.random() * canvas.width, y: 30 + Math.random() * canvas.height * 0.7, r: 14 + Math.random() * 18, phase: Math.random() * 100, drift: (Math.random() - 0.5) * 0.24 });
+        }
+        if (theme.name === "ABYSSAL TRENCH") {
+            for (let i = 0; i < 42; i++) glowMotes.push({ x: Math.random() * canvas.width, y: Math.random() * canvas.height, r: 1 + Math.random() * 2.8, phase: Math.random() * 100, speed: 0.08 + Math.random() * 0.12 });
+        }
+        if (theme.name === "VOLCANIC VENTS") {
+            for (let i = 0; i < 26; i++) ventEmbers.push({ x: Math.random() * canvas.width, y: canvas.height - Math.random() * 120, vx: (Math.random() - 0.5) * 0.18, vy: 0.25 + Math.random() * 0.35, r: 1 + Math.random() * 2.4, life: 0.4 + Math.random() * 0.6 });
+        }
+    }
 
     function resizeCanvas() {
         const rect = container.getBoundingClientRect();
@@ -167,12 +218,14 @@ game_html += r"""
         player.targetX = player.x; player.targetY = player.y;
         regenerateKelp();
         regenerateReef();
+        regenerateAmbientLife();
     }
     function regenerateKelp() {
         kelpFronds = [];
+        const theme = getCurrentTheme();
         const count = Math.max(4, Math.floor(canvas.width / 140));
         for (let i = 0; i < count; i++) {
-            kelpFronds.push({ x: Math.random() * canvas.width, height: 70 + Math.random() * 110, sway: Math.random() * 12, phase: Math.random() * 100 });
+            kelpFronds.push({ x: Math.random() * canvas.width, height: 70 + Math.random() * 130, sway: 7 + Math.random() * (theme.name === "KELP FOREST" ? 18 : 10), phase: Math.random() * 100, color: theme.kelp });
         }
     }
 
@@ -192,6 +245,7 @@ game_html += r"""
     }
     function regenerateReef() {
         const w = canvas.width, h = canvas.height;
+        const theme = getCurrentTheme();
         reefRocks = []; reefCorals = []; reefAnemones = [];
 
         const rockCount = Math.max(3, Math.round(w / 240));
@@ -217,6 +271,8 @@ game_html += r"""
                     dx: (Math.random() - 0.5) * height * 0.6, len: height * (0.3 + Math.random() * 0.4), wid: 5 + Math.random() * 6,
                 })),
                 hue: Math.random() < 0.5 ? "teal" : "amber",
+                tintA: theme.coralA,
+                tintB: theme.coralB,
                 phase: Math.random() * 100,
             });
         }
@@ -227,7 +283,7 @@ game_html += r"""
                 x: (i + 0.5) * (w / anemoneCount) + (Math.random() - 0.5) * 90,
                 base: 14 + Math.random() * 16, lift: 10 + Math.random() * 26,
                 tentacles: 9 + Math.floor(Math.random() * 7),
-                phase: Math.random() * 100, hue: Math.random() < 0.6 ? "teal" : "amber",
+                phase: Math.random() * 100, hue: Math.random() < 0.6 ? "teal" : "amber", tintA: theme.coralA, tintB: theme.coralB,
             });
         }
     }
@@ -237,11 +293,27 @@ game_html += r"""
 
     function setupAudio() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
     function sound(type) {
-        setupAudio(); if (!audioCtx) return; let osc = audioCtx.createOscillator(), gain = audioCtx.createGain(); osc.connect(gain); gain.connect(audioCtx.destination);
-        if (type === "zap") { osc.type = "sawtooth"; osc.frequency.setValueAtTime(420, audioCtx.currentTime); osc.frequency.exponentialRampToValueAtTime(30, audioCtx.currentTime + 0.12); gain.gain.setValueAtTime(0.3, audioCtx.currentTime); osc.start(); osc.stop(audioCtx.currentTime + 0.12); }
-        else if (type === "ding") { osc.type = "sine"; osc.frequency.setValueAtTime(880, audioCtx.currentTime); osc.frequency.linearRampToValueAtTime(1200, audioCtx.currentTime + 0.06); gain.gain.setValueAtTime(0.15, audioCtx.currentTime); osc.start(); osc.stop(audioCtx.currentTime + 0.06); }
-        else if (type === "boom") { osc.type = "sawtooth"; osc.frequency.setValueAtTime(90, audioCtx.currentTime); osc.frequency.exponentialRampToValueAtTime(15, audioCtx.currentTime + 0.4); gain.gain.setValueAtTime(0.6, audioCtx.currentTime); osc.start(); osc.stop(audioCtx.currentTime + 0.4); }
-        else if (type === "level") { osc.type = "sine"; osc.frequency.setValueAtTime(440, audioCtx.currentTime); osc.frequency.setValueAtTime(554.37, audioCtx.currentTime + 0.08); osc.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.16); gain.gain.setValueAtTime(0.2, audioCtx.currentTime); osc.start(); osc.stop(audioCtx.currentTime + 0.35); }
+        setupAudio(); if (!audioCtx) return;
+        const now = audioCtx.currentTime;
+        if (type === "crunch") {
+            const buffer = audioCtx.createBuffer(1, Math.floor(audioCtx.sampleRate * 0.12), audioCtx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+            const noise = audioCtx.createBufferSource(); noise.buffer = buffer;
+            const filter = audioCtx.createBiquadFilter(); filter.type = "bandpass"; filter.frequency.setValueAtTime(900, now); filter.frequency.exponentialRampToValueAtTime(240, now + 0.12);
+            const biteGain = audioCtx.createGain(); biteGain.gain.setValueAtTime(0.001, now); biteGain.gain.exponentialRampToValueAtTime(0.35, now + 0.01); biteGain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+            noise.connect(filter); filter.connect(biteGain); biteGain.connect(audioCtx.destination); noise.start(now); noise.stop(now + 0.12);
+            const osc = audioCtx.createOscillator(); const oscGain = audioCtx.createGain();
+            osc.type = "triangle"; osc.frequency.setValueAtTime(260, now); osc.frequency.exponentialRampToValueAtTime(110, now + 0.12);
+            oscGain.gain.setValueAtTime(0.10, now); oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+            osc.connect(oscGain); oscGain.connect(audioCtx.destination); osc.start(now); osc.stop(now + 0.12);
+            return;
+        }
+        let osc = audioCtx.createOscillator(), gain = audioCtx.createGain(); osc.connect(gain); gain.connect(audioCtx.destination);
+        if (type === "zap") { osc.type = "sawtooth"; osc.frequency.setValueAtTime(420, now); osc.frequency.exponentialRampToValueAtTime(30, now + 0.12); gain.gain.setValueAtTime(0.3, now); osc.start(now); osc.stop(now + 0.12); }
+        else if (type === "ding") { osc.type = "sine"; osc.frequency.setValueAtTime(720, now); osc.frequency.linearRampToValueAtTime(980, now + 0.05); gain.gain.setValueAtTime(0.12, now); osc.start(now); osc.stop(now + 0.05); }
+        else if (type === "boom") { osc.type = "sawtooth"; osc.frequency.setValueAtTime(90, now); osc.frequency.exponentialRampToValueAtTime(15, now + 0.4); gain.gain.setValueAtTime(0.6, now); osc.start(now); osc.stop(now + 0.4); }
+        else if (type === "level") { osc.type = "sine"; osc.frequency.setValueAtTime(440, now); osc.frequency.setValueAtTime(554.37, now + 0.08); osc.frequency.setValueAtTime(659.25, now + 0.16); gain.gain.setValueAtTime(0.2, now); osc.start(now); osc.stop(now + 0.35); }
     }
 
     function updateInputCoordinates(clientX, clientY) {
@@ -358,8 +430,9 @@ game_html += r"""
 
     /* ---------- Reef floor: sediment mound, layered rock and coral silhouettes ---------- */
     function reefTint(kind, lightness) {
-        if (kind === "amber") return `rgba(${Math.round(150 * lightness + 40)}, ${Math.round(96 * lightness + 30)}, ${Math.round(38 * lightness + 18)}, 1)`;
-        return `rgba(${Math.round(24 * lightness + 6)}, ${Math.round(120 * lightness + 26)}, ${Math.round(112 * lightness + 34)}, 1)`;
+        const theme = getCurrentTheme();
+        if (kind === "amber") return theme.coralB;
+        return theme.coralA;
     }
     function drawCoralReef() {
         const w = canvas.width, h = canvas.height;
@@ -404,7 +477,7 @@ game_html += r"""
                     ctx.stroke();
                 });
                 // luminous polyp tips
-                ctx.fillStyle = c.hue === "amber" ? "rgba(250, 204, 21, 0.5)" : "rgba(52, 211, 153, 0.5)";
+                ctx.fillStyle = c.hue === "amber" ? c.tintB : c.tintA;
                 c.segs.filter(s => s.tip).forEach(s => {
                     ctx.beginPath(); ctx.arc(s.x2 + sway * (-s.y2 / c.height) * 0.6, s.y2, Math.max(1.2, s.w * 0.7), 0, Math.PI * 2); ctx.fill();
                 });
@@ -412,7 +485,7 @@ game_html += r"""
                 // wide, flat sea fan (broader than tall) rather than a balloon shape
                 const fh = c.height * 0.8, fw = c.height * 1.15;
                 let fg = ctx.createLinearGradient(0, 0, 0, -fh);
-                fg.addColorStop(0, body); fg.addColorStop(1, c.hue === "amber" ? "rgba(150, 92, 34, 0.16)" : "rgba(38, 160, 145, 0.16)");
+                fg.addColorStop(0, body); fg.addColorStop(1, c.hue === "amber" ? c.tintB : c.tintA);
                 ctx.fillStyle = fg; ctx.globalAlpha *= 0.7;
                 ctx.beginPath(); ctx.moveTo(0, 0);
                 ctx.quadraticCurveTo(-fw * 0.55 + sway * 0.6, -fh * 0.35, -fw * 0.5 + sway, -fh * 0.92);
@@ -420,7 +493,7 @@ game_html += r"""
                 ctx.quadraticCurveTo(fw * 0.55 + sway * 0.6, -fh * 0.35, 0, 0);
                 ctx.closePath(); ctx.fill();
                 // fan lattice ribs
-                ctx.strokeStyle = c.hue === "amber" ? "rgba(250, 204, 21, 0.16)" : "rgba(190, 245, 240, 0.16)"; ctx.lineWidth = 1;
+                ctx.strokeStyle = c.hue === "amber" ? c.tintB : c.tintA; ctx.lineWidth = 1;
                 for (let i = -4; i <= 4; i++) {
                     ctx.beginPath(); ctx.moveTo(0, 0);
                     ctx.quadraticCurveTo(i * fw * 0.09 + sway * 0.5, -fh * 0.5, i * fw * 0.115 + sway, -fh * 0.9); ctx.stroke();
@@ -432,7 +505,7 @@ game_html += r"""
                     const lean = t.dx * 0.35;
                     ctx.beginPath(); ctx.moveTo(t.dx, 0);
                     ctx.quadraticCurveTo(t.dx + lean * 0.5 + sway * 0.4, -t.len * 0.65, t.dx + lean + sway, -t.len); ctx.stroke();
-                    ctx.fillStyle = c.hue === "amber" ? "rgba(250, 204, 21, 0.28)" : "rgba(52, 211, 153, 0.28)";
+                    ctx.fillStyle = c.hue === "amber" ? c.tintB : c.tintA;
                     ctx.beginPath(); ctx.ellipse(t.dx + lean + sway, -t.len, t.wid * 0.6, t.wid * 0.35, 0, 0, Math.PI * 2); ctx.fill();
                     void i;
                 });
@@ -475,6 +548,52 @@ game_html += r"""
         });
     }
 
+    function drawAmbientLife(dt) {
+        const theme = getCurrentTheme();
+        ambientSchools.forEach(s => {
+            s.x += s.speed * s.dir * dt * 16;
+            if (s.x < -s.spread * 2) s.x = canvas.width + s.spread;
+            if (s.x > canvas.width + s.spread * 2) s.x = -s.spread;
+            ctx.save(); ctx.globalAlpha = 0.16;
+            for (let i = 0; i < s.count; i++) {
+                const fx = s.x + Math.sin(timeTick * 0.02 + i) * s.spread + i * s.dir * 8;
+                const fy = s.y + Math.cos(timeTick * 0.025 + i * 0.7) * 18;
+                ctx.fillStyle = theme.name === "JELLY BLOOM" ? "rgba(216,180,254,0.22)" : "rgba(226,250,255,0.18)";
+                ctx.beginPath();
+                ctx.moveTo(fx, fy);
+                ctx.lineTo(fx - 8 * s.dir * s.scale, fy - 3 * s.scale);
+                ctx.lineTo(fx - 8 * s.dir * s.scale, fy + 3 * s.scale);
+                ctx.closePath();
+                ctx.fill();
+            }
+            ctx.restore();
+        });
+        driftingJellies.forEach(j => {
+            j.y -= 0.05 * dt; j.x += Math.sin(timeTick * 0.02 + j.phase) * 0.3 + j.drift * dt;
+            if (j.y < -30) j.y = canvas.height + 30;
+            ctx.save(); ctx.translate(j.x, j.y); ctx.globalCompositeOperation = "lighter";
+            const pulse = 0.55 + Math.sin(timeTick * 0.04 + j.phase) * 0.25;
+            ctx.fillStyle = `rgba(216,180,254,${0.12 * pulse})`;
+            ctx.beginPath(); ctx.arc(0, 0, j.r * 1.5, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = `rgba(216,180,254,${0.22 * pulse})`;
+            ctx.beginPath(); ctx.arc(0, 0, j.r, Math.PI, 0); ctx.lineTo(j.r, 0); ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = `rgba(243,232,255,${0.18 * pulse})`;
+            for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.moveTo(i * j.r * 0.18, 0); ctx.quadraticCurveTo(i * j.r * 0.24, j.r * 0.9, i * j.r * 0.12, j.r * 1.8); ctx.stroke(); }
+            ctx.restore();
+        });
+        glowMotes.forEach(g => {
+            g.y -= g.speed * dt; if (g.y < -5) g.y = canvas.height + 5;
+            ctx.fillStyle = `rgba(56,189,248,${0.12 + Math.sin(timeTick * 0.03 + g.phase) * 0.08})`;
+            ctx.beginPath(); ctx.arc(g.x, g.y, g.r, 0, Math.PI * 2); ctx.fill();
+        });
+        ventEmbers.forEach(e => {
+            e.x += e.vx * dt * 16; e.y -= e.vy * dt * 10; e.life -= 0.005 * dt;
+            if (e.life <= 0 || e.y < canvas.height - 220) { e.x = Math.random() * canvas.width; e.y = canvas.height - Math.random() * 90; e.life = 0.4 + Math.random() * 0.6; }
+            ctx.fillStyle = `rgba(248,113,113,${e.life * 0.45})`;
+            ctx.beginPath(); ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2); ctx.fill();
+        });
+    }
+
     function drawAura(r, colorRgb, strong) {
         const outer = strong ? r * 1.5 : r * 1.3;
         const peakAlpha = strong ? 0.4 : 0.22;
@@ -495,7 +614,7 @@ game_html += r"""
         ctx.closePath();
     }
 
-    function drawRealisticFish(x, y, r, isLeft, species, fishType, pulseTick, speedMag, tiltAngle, depthScale, auraColorRgb) {
+    function drawRealisticFish(x, y, r, isLeft, species, fishType, pulseTick, speedMag, tiltAngle, depthScale, auraColorRgb, mouthOpen = 0, isPlayer = false) {
         ctx.save(); ctx.translate(x, y); ctx.scale(depthScale, depthScale); if (isLeft) ctx.scale(-1, 1);
         ctx.rotate(Math.max(-0.3, Math.min(0.3, tiltAngle)) * (isLeft ? -1 : 1));
 
@@ -504,8 +623,11 @@ game_html += r"""
         const wagSpeed = 0.1 + Math.min(0.28, speedMag * 0.2);
         const wag = Math.sin(pulseTick * wagSpeed) * (r * (0.2 + Math.min(0.15, speedMag * 0.1)));
         const tailWag = Math.sin(pulseTick * wagSpeed + 0.6) * (r * 0.34);
-        // body depth by species build: 1 = deep/disc, 2 = slender torpedo, 3 = balanced
-        const bodyYScale = fishType === 1 ? 1.02 : (fishType === 2 ? 0.60 : 0.80);
+        const bodyYScale = fishType === 1 ? 1.06 : (fishType === 2 ? 0.60 : (fishType === 4 ? 1.14 : (fishType === 5 ? 0.56 : 0.80)));
+        const bodyXScale = fishType === 2 ? 1.12 : (fishType === 4 ? 0.88 : (fishType === 5 ? 1.30 : 1.0));
+        const drawScaleRows = isPlayer || r >= 18;
+        const drawPremiumSheen = isPlayer || r >= 14;
+        ctx.scale(bodyXScale, 1);
 
         // contact shadow (depth cue)
         ctx.save(); ctx.globalAlpha = 0.16; ctx.fillStyle = "#000814"; ctx.beginPath(); ctx.ellipse(r * 0.05, r * (0.95 * bodyYScale + 0.35), r * 0.95, r * 0.22, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();
@@ -516,12 +638,22 @@ game_html += r"""
         tailGrd.addColorStop(0, species.bands[2]); tailGrd.addColorStop(0.55, species.bands[1]); tailGrd.addColorStop(1, species.finColor);
         ctx.fillStyle = tailGrd; ctx.globalAlpha = 0.9;
         ctx.beginPath();
-        if (fishType === 2) { // deep fork (fast swimmer)
+        if (fishType === 5) { // shark-like tail
+            ctx.moveTo(tx, -r * 0.08 * bodyYScale);
+            ctx.lineTo(-r * 1.95, -r * 0.92 + tailWag);
+            ctx.lineTo(-r * 1.35, -r * 0.04 + tailWag * 0.55);
+            ctx.lineTo(-r * 1.95, r * 0.92 + tailWag);
+            ctx.lineTo(tx, r * 0.08 * bodyYScale);
+        } else if (fishType === 2) { // deep fork (fast swimmer)
             ctx.moveTo(tx, -r * 0.12 * bodyYScale);
             ctx.quadraticCurveTo(-r * 1.5, -r * 0.95 + tailWag, -r * 2.15, -r * 1.05 + tailWag);
             ctx.quadraticCurveTo(-r * 1.42, -r * 0.16 + tailWag * 0.7, -r * 1.30, tailWag * 0.6);
             ctx.quadraticCurveTo(-r * 1.42, r * 0.16 + tailWag * 0.7, -r * 2.15, r * 1.05 + tailWag);
             ctx.quadraticCurveTo(-r * 1.5, r * 0.95 + tailWag, tx, r * 0.12 * bodyYScale);
+        } else if (fishType === 4) { // puffer stub
+            ctx.moveTo(tx, -r * 0.10 * bodyYScale);
+            ctx.quadraticCurveTo(-r * 1.15, -r * 0.38 + tailWag * 0.4, -r * 1.34, 0 + tailWag * 0.35);
+            ctx.quadraticCurveTo(-r * 1.15, r * 0.38 + tailWag * 0.4, tx, r * 0.10 * bodyYScale);
         } else { // fan / rounded caudal
             ctx.moveTo(tx, -r * 0.14 * bodyYScale);
             ctx.quadraticCurveTo(-r * 1.45, -r * 0.78 + tailWag, -r * 1.95, -r * 0.72 + tailWag);
@@ -543,10 +675,16 @@ game_html += r"""
         dorsalGrd.addColorStop(0, species.bands[1]); dorsalGrd.addColorStop(1, species.finColor);
         ctx.fillStyle = dorsalGrd; ctx.globalAlpha = 0.94;
         ctx.beginPath();
-        ctx.moveTo(-r * 0.72, -r * 0.55 * bodyYScale);
-        ctx.quadraticCurveTo(-r * 0.30, -r * (1.45 * bodyYScale) + wag * 0.3, r * 0.16, -r * (1.22 * bodyYScale));
-        ctx.quadraticCurveTo(r * 0.34, -r * (0.98 * bodyYScale), r * 0.42, -r * (0.72 * bodyYScale));
-        ctx.quadraticCurveTo(-r * 0.10, -r * (0.86 * bodyYScale), -r * 0.72, -r * 0.55 * bodyYScale);
+        if (fishType === 5) {
+            ctx.moveTo(-r * 0.30, -r * 0.46 * bodyYScale);
+            ctx.lineTo(-r * 0.02, -r * 1.32 * bodyYScale);
+            ctx.lineTo(r * 0.28, -r * 0.48 * bodyYScale);
+        } else {
+            ctx.moveTo(-r * 0.72, -r * 0.55 * bodyYScale);
+            ctx.quadraticCurveTo(-r * 0.30, -r * ((fishType === 1 ? 1.65 : 1.45) * bodyYScale) + wag * 0.3, r * 0.16, -r * ((fishType === 1 ? 1.34 : 1.22) * bodyYScale));
+            ctx.quadraticCurveTo(r * 0.34, -r * (fishType === 4 ? 0.62 : 0.98) * bodyYScale, r * 0.42, -r * (0.72 * bodyYScale));
+            ctx.quadraticCurveTo(-r * 0.10, -r * (0.86 * bodyYScale), -r * 0.72, -r * 0.55 * bodyYScale);
+        }
         ctx.closePath(); ctx.fill();
         ctx.globalAlpha = 1;
 
@@ -574,16 +712,17 @@ game_html += r"""
         pedGrd.addColorStop(0, "rgba(0,0,0,0)"); pedGrd.addColorStop(1, "rgba(2,6,14,0.45)");
         ctx.fillStyle = pedGrd; ctx.fillRect(-r * 1.3, -r * 1.3, r * 1.3, r * 2.6);
 
-        // scale rows — embossed overlapping arcs (dark crease + light catch) for a real scaled texture
-        const scaleStep = Math.max(3.2, r * 0.24);
-        ctx.lineWidth = Math.max(0.5, r * 0.028);
-        for (let pass = 0; pass < 2; pass++) {
-            ctx.strokeStyle = pass === 0 ? "rgba(2,8,18,0.22)" : "rgba(255,255,255,0.22)";
-            const shift = pass === 0 ? scaleStep * 0.12 : 0;
-            for (let sy = -r * 0.9; sy < r * 0.9; sy += scaleStep) {
-                for (let sx = -r * 0.9; sx < r * 1.0; sx += scaleStep) {
-                    const off = (Math.round((sy + r) / scaleStep) % 2) * scaleStep * 0.5;
-                    ctx.beginPath(); ctx.arc(sx + off, sy + shift, scaleStep * 0.52, Math.PI * 0.15, Math.PI * 0.85); ctx.stroke();
+        if (drawScaleRows) {
+            const scaleStep = Math.max(3.2, r * 0.24);
+            ctx.lineWidth = Math.max(0.5, r * 0.028);
+            for (let pass = 0; pass < 2; pass++) {
+                ctx.strokeStyle = pass === 0 ? "rgba(2,8,18,0.22)" : "rgba(255,255,255,0.22)";
+                const shift = pass === 0 ? scaleStep * 0.12 : 0;
+                for (let sy = -r * 0.9; sy < r * 0.9; sy += scaleStep) {
+                    for (let sx = -r * 0.9; sx < r * 1.0; sx += scaleStep) {
+                        const off = (Math.round((sy + r) / scaleStep) % 2) * scaleStep * 0.5;
+                        ctx.beginPath(); ctx.arc(sx + off, sy + shift, scaleStep * 0.52, Math.PI * 0.15, Math.PI * 0.85); ctx.stroke();
+                    }
                 }
             }
         }
@@ -609,28 +748,26 @@ game_html += r"""
         bellyGrd.addColorStop(0, "rgba(255,255,255,0)"); bellyGrd.addColorStop(1, "rgba(255,255,255,0.34)");
         ctx.fillStyle = bellyGrd; ctx.fillRect(-r * 1.3, 0, r * 2.7, r * 1.3);
 
-        // ---- premium 3D pass: layered radial sheens + specular hotspots ----
-        ctx.globalCompositeOperation = "screen";
-        // broad wet sheen wrapping the upper flank
-        let sheen = ctx.createRadialGradient(r * 0.34, -r * 0.5, r * 0.04, r * 0.05, -r * 0.05, r * 1.3);
-        sheen.addColorStop(0, "rgba(226, 250, 255, 0.5)");
-        sheen.addColorStop(0.34, "rgba(140, 210, 235, 0.18)");
-        sheen.addColorStop(1, "rgba(120, 190, 220, 0)");
-        ctx.fillStyle = sheen; ctx.fillRect(-r * 1.3, -r * 1.3, r * 2.7, r * 2.6);
-        // secondary iridescent bounce light from the water below
-        let bounce = ctx.createRadialGradient(-r * 0.25, r * 0.6, r * 0.03, -r * 0.2, r * 0.55, r * 1.0);
-        bounce.addColorStop(0, "rgba(94, 234, 212, 0.28)");
-        bounce.addColorStop(1, "rgba(94, 234, 212, 0)");
-        ctx.fillStyle = bounce; ctx.fillRect(-r * 1.3, -r * 1.3, r * 2.7, r * 2.6);
-        ctx.globalCompositeOperation = "source-over";
+        if (drawPremiumSheen) {
+            ctx.globalCompositeOperation = "screen";
+            let sheen = ctx.createRadialGradient(r * 0.34, -r * 0.5, r * 0.04, r * 0.05, -r * 0.05, r * 1.3);
+            sheen.addColorStop(0, "rgba(226, 250, 255, 0.5)");
+            sheen.addColorStop(0.34, "rgba(140, 210, 235, 0.18)");
+            sheen.addColorStop(1, "rgba(120, 190, 220, 0)");
+            ctx.fillStyle = sheen; ctx.fillRect(-r * 1.3, -r * 1.3, r * 2.7, r * 2.6);
+            let bounce = ctx.createRadialGradient(-r * 0.25, r * 0.6, r * 0.03, -r * 0.2, r * 0.55, r * 1.0);
+            bounce.addColorStop(0, "rgba(94, 234, 212, 0.28)");
+            bounce.addColorStop(1, "rgba(94, 234, 212, 0)");
+            ctx.fillStyle = bounce; ctx.fillRect(-r * 1.3, -r * 1.3, r * 2.7, r * 2.6);
+            ctx.globalCompositeOperation = "source-over";
 
-        // tight specular hotspot (the glossy 3D "kick") plus a smaller snout highlight
-        let spec = ctx.createRadialGradient(r * 0.4, -r * 0.44, 0, r * 0.4, -r * 0.44, r * 0.52);
-        spec.addColorStop(0, "rgba(255,255,255,0.9)"); spec.addColorStop(0.45, "rgba(255,255,255,0.22)"); spec.addColorStop(1, "rgba(255,255,255,0)");
-        ctx.fillStyle = spec; ctx.beginPath(); ctx.ellipse(r * 0.4, -r * 0.42, r * 0.5, r * 0.26, -0.35, 0, Math.PI * 2); ctx.fill();
-        let spec2 = ctx.createRadialGradient(r * 0.86, -r * 0.1, 0, r * 0.86, -r * 0.1, r * 0.26);
-        spec2.addColorStop(0, "rgba(255,255,255,0.6)"); spec2.addColorStop(1, "rgba(255,255,255,0)");
-        ctx.fillStyle = spec2; ctx.beginPath(); ctx.ellipse(r * 0.86, -r * 0.1, r * 0.24, r * 0.16, 0, 0, Math.PI * 2); ctx.fill();
+            let spec = ctx.createRadialGradient(r * 0.4, -r * 0.44, 0, r * 0.4, -r * 0.44, r * 0.52);
+            spec.addColorStop(0, "rgba(255,255,255,0.9)"); spec.addColorStop(0.45, "rgba(255,255,255,0.22)"); spec.addColorStop(1, "rgba(255,255,255,0)");
+            ctx.fillStyle = spec; ctx.beginPath(); ctx.ellipse(r * 0.4, -r * 0.42, r * 0.5, r * 0.26, -0.35, 0, Math.PI * 2); ctx.fill();
+            let spec2 = ctx.createRadialGradient(r * 0.86, -r * 0.1, 0, r * 0.86, -r * 0.1, r * 0.26);
+            spec2.addColorStop(0, "rgba(255,255,255,0.6)"); spec2.addColorStop(1, "rgba(255,255,255,0)");
+            ctx.fillStyle = spec2; ctx.beginPath(); ctx.ellipse(r * 0.86, -r * 0.1, r * 0.24, r * 0.16, 0, 0, Math.PI * 2); ctx.fill();
+        }
 
         ctx.restore(); // drop clip
 
@@ -657,17 +794,38 @@ game_html += r"""
         // mouth line at the snout
         ctx.strokeStyle = "rgba(2,8,16,0.6)"; ctx.lineWidth = Math.max(0.8, r * 0.05);
         ctx.beginPath(); ctx.moveTo(r * 1.06, r * 0.10); ctx.quadraticCurveTo(r * 0.90, r * 0.20, r * 0.78, r * 0.16); ctx.stroke();
+        if (mouthOpen > 0.04) {
+            ctx.fillStyle = "rgba(127, 29, 29, 0.72)";
+            ctx.beginPath();
+            ctx.moveTo(r * 1.02, 0);
+            ctx.lineTo(r * 0.82, -r * 0.16 * mouthOpen);
+            ctx.lineTo(r * 0.82, r * 0.16 * mouthOpen);
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = "rgba(255,255,255,0.25)";
+            ctx.beginPath(); ctx.moveTo(r * 0.84, 0); ctx.lineTo(r * 0.98, -r * 0.02); ctx.stroke();
+        }
 
         ctx.restore(); // undo bodyYScale
 
         // eye — drawn after the y-scale is undone so it stays perfectly round
-        let eyeX = r * 0.66; let eyeY = -r * 0.28 * bodyYScale; let eyeRadius = Math.max(2.5, r * 0.17);
+        let eyeX = fishType === 5 ? r * 0.74 : r * 0.66; let eyeY = -r * 0.28 * bodyYScale; let eyeRadius = Math.max(2.5, r * 0.17);
         ctx.fillStyle = "rgba(255,255,255,0.7)"; ctx.beginPath(); ctx.arc(eyeX, eyeY, eyeRadius * 1.18, 0, Math.PI * 2); ctx.fill();
         let eyeGrd = ctx.createRadialGradient(eyeX - eyeRadius * 0.2, eyeY - eyeRadius * 0.2, 1, eyeX, eyeY, eyeRadius);
         eyeGrd.addColorStop(0, "#fdfdff"); eyeGrd.addColorStop(1, "#b9c6d4");
         ctx.fillStyle = eyeGrd; ctx.beginPath(); ctx.arc(eyeX, eyeY, eyeRadius, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = "#020617"; ctx.beginPath(); ctx.arc(eyeX + eyeRadius * 0.12, eyeY, eyeRadius * 0.52, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(eyeX + eyeRadius * 0.34, eyeY - eyeRadius * 0.24, eyeRadius * 0.17, 0, Math.PI * 2); ctx.fill();
+        if (fishType === 4) {
+            ctx.strokeStyle = "rgba(255,255,255,0.35)";
+            ctx.lineWidth = Math.max(0.8, r * 0.04);
+            for (let i = -3; i <= 3; i++) {
+                ctx.beginPath(); ctx.moveTo(i * r * 0.16, -r * 0.92); ctx.lineTo(i * r * 0.09, -r * 1.12); ctx.stroke();
+            }
+        } else if (fishType === 5) {
+            ctx.fillStyle = "rgba(15, 23, 42, 0.45)";
+            ctx.beginPath(); ctx.moveTo(r * 0.12, -r * 0.10); ctx.lineTo(r * 0.62, -r * 0.02); ctx.lineTo(r * 0.18, r * 0.08); ctx.closePath(); ctx.fill();
+        }
 
         ctx.restore();
     }
@@ -680,10 +838,10 @@ game_html += r"""
 game_html += r"""
     function initiateArcadeGame() {
         setupAudio(); score = 0; gameActive = true; gamePaused = false; player.radius = 15;
-        player.x = canvas.width / 2; player.y = canvas.height / 2; player.targetX = player.x; player.targetY = player.y; player.vx = 0; player.vy = 0;
-        marineThreats = []; environmentBubbles = []; particles = []; screenShake = 0; lastTimestamp = null;
+        player.x = canvas.width / 2; player.y = canvas.height / 2; player.targetX = player.x; player.targetY = player.y; player.vx = 0; player.vy = 0; player.eatTimer = 0;
+        marineThreats = []; environmentBubbles = []; particles = []; screenShake = 0; lastTimestamp = null; currentMapIndex = 0;
         screenOverlay.style.display = "none"; pauseOverlay.style.display = "none"; titleScreen.style.display = "none"; hud.style.display = "flex";
-        scoreLabel.innerText = "SCORE: 00000"; sizeLabel.innerText = "RANK: MINNOW (15)";
+        scoreLabel.innerText = "SCORE: 00000"; sizeLabel.innerText = "RANK: MINNOW (15)"; syncTheme(true);
         if (spawnIntervalId) clearInterval(spawnIntervalId); spawnIntervalId = setInterval(generateMarineLife, 650);
         if (animationFrameId) cancelAnimationFrame(animationFrameId); animationFrameId = requestAnimationFrame(runGameLoop);
     }
@@ -701,11 +859,13 @@ game_html += r"""
 
         const spawnFromLeft = Math.random() > 0.5;
         const speciesIdx = Math.floor(Math.random() * FISH_SPECIES.length);
-        const specificType = Math.floor(Math.random() * 3) + 1;
+        const theme = getCurrentTheme();
+        const specificType = theme.fishTypes[Math.floor(Math.random() * theme.fishTypes.length)];
         const sizeRadius = makeEdible ? Math.max(6, player.radius - (Math.random() * 12 + 5)) : player.radius + (Math.random() * 16 + 6);
         const baseY = Math.random() * (canvas.height - 90) + 45;
-        const baseSpeed = (Math.random() * 0.55 + 0.5) * (spawnFromLeft ? 1 : -1);
-        marineThreats.push({ x: spawnFromLeft ? -60 : canvas.width + 60, y: baseY, radius: sizeRadius, vx: baseSpeed, vy: 0, fishType: specificType, speciesIdx, wagPhase: Math.random() * 100 });
+        const speedBoost = specificType === 2 ? 0.35 : (specificType === 5 ? 0.18 : 0);
+        const baseSpeed = (Math.random() * 0.55 + 0.5 + speedBoost) * (spawnFromLeft ? 1 : -1);
+        marineThreats.push({ x: spawnFromLeft ? -60 : canvas.width + 60, y: baseY, radius: sizeRadius, vx: baseSpeed, vy: 0, fishType: specificType, speciesIdx, wagPhase: Math.random() * 100, driftPhase: Math.random() * 100 });
     }
 
     function getRankName(r) { if (r < 25) return "MINNOW"; if (r < 40) return "BASS"; if (r < 55) return "TUNA"; return "APEX SHARK"; }
@@ -728,7 +888,9 @@ game_html += r"""
         ctx.save();
         if (screenShake > 0) { ctx.translate((Math.random() - 0.5) * screenShake, (Math.random() - 0.5) * screenShake); screenShake *= 0.9; if (screenShake < 0.3) screenShake = 0; }
 
-        let oceanBackground = ctx.createLinearGradient(0, 0, 0, canvas.height); oceanBackground.addColorStop(0, "#041628"); oceanBackground.addColorStop(0.5, "#020f1c"); oceanBackground.addColorStop(1, "#01050d"); ctx.fillStyle = oceanBackground; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        const theme = getCurrentTheme();
+        let oceanBackground = ctx.createLinearGradient(0, 0, 0, canvas.height); oceanBackground.addColorStop(0, theme.bgTop); oceanBackground.addColorStop(0.5, theme.bgMid); oceanBackground.addColorStop(1, theme.bgBottom); ctx.fillStyle = oceanBackground; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        if (zoneBannerTimer > 0) { zoneBannerTimer -= dt; if (zoneBannerTimer <= 0) zoneBanner.style.opacity = "0"; }
 
         const causticPulse = 0.015 + Math.sin(timeTick * 0.02) * 0.008;
         const midX = canvas.width / 2;
@@ -738,19 +900,21 @@ game_html += r"""
 
         // Reef silhouettes sit behind the kelp; depth fog pushes them back into the dark water
         drawCoralReef();
+        drawAmbientLife(dt);
         let depthFog = ctx.createLinearGradient(0, canvas.height * 0.55, 0, canvas.height);
-        depthFog.addColorStop(0, "rgba(2, 12, 22, 0)"); depthFog.addColorStop(1, "rgba(2, 12, 22, 0.55)");
+        depthFog.addColorStop(0, theme.fog); depthFog.addColorStop(1, "rgba(2, 12, 22, 0.55)");
         ctx.fillStyle = depthFog; ctx.fillRect(0, canvas.height * 0.55, canvas.width, canvas.height * 0.45);
 
         kelpFronds.forEach(k => {
             const sway = Math.sin(timeTick * 0.015 + k.phase) * k.sway;
-            ctx.strokeStyle = "rgba(6, 78, 59, 0.35)"; ctx.lineWidth = 6; ctx.beginPath();
+            ctx.strokeStyle = k.color; ctx.globalAlpha = 0.32; ctx.lineWidth = theme.name === "KELP FOREST" ? 8 : 6; ctx.beginPath();
             ctx.moveTo(k.x, canvas.height); ctx.quadraticCurveTo(k.x + sway, canvas.height - k.height * 0.5, k.x + sway * 1.6, canvas.height - k.height); ctx.stroke();
+            ctx.globalAlpha = 1;
         });
 
         drawAnemones();
 
-        if (Math.random() < 0.06 * dt) environmentBubbles.push({ x: Math.random() * canvas.width, y: canvas.height + 20, r: Math.random() * 2.5 + 1, speed: Math.random() * 0.8 + 0.4, drift: (Math.random() - 0.5) * 0.4 });
+        if (environmentBubbles.length < 40 && Math.random() < 0.05 * dt) environmentBubbles.push({ x: Math.random() * canvas.width, y: canvas.height + 20, r: Math.random() * 2.5 + 1, speed: Math.random() * 0.8 + 0.4, drift: (Math.random() - 0.5) * 0.4 });
         environmentBubbles.forEach((b, i) => { b.y -= b.speed * dt; b.x += b.drift * dt; ctx.fillStyle = "rgba(52, 211, 153, 0.12)"; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); if (b.y < -10) environmentBubbles.splice(i, 1); });
 
         particles.forEach((p, i) => {
@@ -772,27 +936,33 @@ game_html += r"""
         player.x = Math.max(15, Math.min(player.x, canvas.width - 15)); player.y = Math.max(15, Math.min(player.y, canvas.height - 15));
         if (Math.abs(player.vx) > 0.1) player.facingLeft = player.vx < 0;
         player.tiltAngle += ((player.vy * 0.12) - player.tiltAngle) * Math.min(1, 0.15 * dt);
-        player.tailWag += dt;
+        player.tailWag += dt; player.eatTimer = Math.max(0, player.eatTimer - dt * 0.18);
         const playerSpeedMag = Math.hypot(player.vx, player.vy);
         const playerDepth = 0.85 + (player.y / canvas.height) * 0.3;
-        drawRealisticFish(player.x, player.y, player.radius, player.facingLeft, PLAYER_SPECIES, 3, player.tailWag, playerSpeedMag, player.tiltAngle, playerDepth, null);
+        drawRealisticFish(player.x, player.y, player.radius, player.facingLeft, PLAYER_SPECIES, 3, player.tailWag, playerSpeedMag, player.tiltAngle, playerDepth, null, Math.min(1, player.eatTimer), true);
 
         for (let index = marineThreats.length - 1; index >= 0; index--) {
             const t = marineThreats[index];
-            t.x += t.vx * dt; t.wagPhase += dt;
+            const dxp = player.x - t.x; const dyp = player.y - t.y; const chaseDist = Math.hypot(dxp, dyp);
+            t.vy += Math.sin(timeTick * 0.03 + t.driftPhase) * 0.005 * dt;
+            if (t.radius < player.radius && chaseDist < 170) t.vy += (dyp > 0 ? -0.02 : 0.02) * dt * 10;
+            if (t.radius >= player.radius && chaseDist < 220) { t.vx += Math.sign(dxp) * 0.012 * dt * 10; t.vy += Math.sign(dyp) * 0.01 * dt * 10; }
+            t.vy = Math.max(-0.6, Math.min(0.6, t.vy));
+            t.x += t.vx * dt; t.y += t.vy * dt * 4; t.y = Math.max(35, Math.min(t.y, canvas.height - 35)); t.wagPhase += dt;
             const isTargetEdible = t.radius < player.radius;
             const auraColor = isTargetEdible ? "74, 222, 128" : "239, 68, 68";
             const tSpeedMag = Math.abs(t.vx);
             const tDepth = 0.85 + (t.y / canvas.height) * 0.3;
-            drawRealisticFish(t.x, t.y, t.radius, t.vx < 0, FISH_SPECIES[t.speciesIdx], t.fishType, t.wagPhase, tSpeedMag, 0, tDepth, auraColor);
+            drawRealisticFish(t.x, t.y, t.radius, t.vx < 0, FISH_SPECIES[t.speciesIdx], t.fishType, t.wagPhase, tSpeedMag, t.vy * 0.08, tDepth, auraColor);
             let distance = Math.hypot(player.x - t.x, player.y - t.y);
             if (distance < player.radius + t.radius * 0.75) {
                 if (isTargetEdible) {
-                    sound("ding"); score += Math.floor(t.radius * 12); player.radius += t.radius * 0.11;
+                    sound("crunch"); score += Math.floor(t.radius * 12); player.radius += t.radius * 0.11; player.eatTimer = 1;
                     spawnParticles(t.x, t.y, 150, 8);
                     marineThreats.splice(index, 1);
                     scoreLabel.innerText = "SCORE: " + String(score).padStart(5, '0');
                     sizeLabel.innerText = `RANK: ${getRankName(player.radius)} (${Math.floor(player.radius)})`;
+                    syncTheme();
                     if (player.radius >= 55) terminateGameEngine(true);
                 } else { terminateGameEngine(false); }
             }
