@@ -19,7 +19,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Part A: Full-screen deep-sea canvas layout
+# Part A: Full-screen deep-sea canvas layout + top-left pause control styling
 game_html = r"""
 <!DOCTYPE html>
 <html>
@@ -29,7 +29,15 @@ game_html = r"""
         html, body { margin: 0; padding: 0; height: 100%; width: 100%; background: #01040a; font-family: monospace; user-select: none; -webkit-user-select: none; overflow: hidden; }
         #gameContainer { position: relative; width: 100vw; height: 100vh; height: 100dvh; margin: 0; overflow: hidden; touch-action: none; }
         canvas { display: block; background: #020b18; width: 100%; height: 100%; }
-        #hud { position: absolute; top: max(14px, env(safe-area-inset-top)); left: 18px; right: 18px; display: flex; justify-content: space-between; color: #34d399; font-size: 16px; font-weight: bold; pointer-events: none; z-index: 10; text-shadow: 0 0 8px #047857; letter-spacing: 1px; }
+
+        /* Top bar: pause button + score on the left, rank on the right */
+        #hud { position: absolute; top: max(14px, env(safe-area-inset-top)); left: 18px; right: 18px; display: flex; justify-content: space-between; align-items: center; color: #34d399; font-size: 16px; font-weight: bold; pointer-events: none; z-index: 10; text-shadow: 0 0 8px #047857; letter-spacing: 1px; }
+        #hudLeft { display: flex; align-items: center; gap: 12px; }
+
+        #pauseBtn { pointer-events: auto; width: 38px; height: 38px; display: flex; align-items: center; justify-content: center; border-radius: 10px; border: 1px solid rgba(52,211,153,0.55); background: rgba(2, 20, 30, 0.72); color: #34d399; cursor: pointer; padding: 0; backdrop-filter: blur(4px); transition: transform 0.1s, background 0.15s; }
+        #pauseBtn:hover { background: rgba(16, 185, 129, 0.22); }
+        #pauseBtn:active { transform: scale(0.92); }
+        #pauseBtn svg { width: 16px; height: 16px; display: block; }
 
         #loadingScreen { position: absolute; inset: 0; background: radial-gradient(circle at 50% 40%, #062338, #010509); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 40; color: #cbd5e1; }
         #loadingBarTrack { width: 240px; height: 10px; border-radius: 6px; background: rgba(255,255,255,0.08); overflow: hidden; margin-top: 22px; border: 1px solid rgba(52,211,153,0.35); }
@@ -45,17 +53,39 @@ game_html = r"""
         @keyframes pulseTap { 0%,100% { opacity: 1; transform: scale(1);} 50% { opacity: 0.55; transform: scale(1.05);} }
 
         #screenOverlay { position: absolute; inset: 0; background: rgba(2, 8, 20, 0.92); display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 20; color: white; text-align: center; }
+
+        /* Pause menu — sits above the frozen game frame */
+        #pauseOverlay { position: absolute; inset: 0; background: rgba(1, 8, 16, 0.78); backdrop-filter: blur(6px); display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 25; text-align: center; }
+        #pauseCard { background: rgba(4, 22, 34, 0.9); border: 1px solid rgba(52, 211, 153, 0.35); border-radius: 18px; padding: 32px 30px; box-shadow: 0 18px 50px rgba(0,0,0,0.55); min-width: 260px; }
+        #pauseTitle { color: #34d399; letter-spacing: 5px; font-size: 22px; margin: 0 0 6px; text-shadow: 0 0 14px #047857; }
+        #pauseHint { color: #64748b; font-size: 11px; letter-spacing: 1px; margin: 0 0 22px; }
+        .menu-btn { display: block; width: 100%; margin-top: 10px; padding: 13px 22px; border-radius: 10px; font-family: monospace; font-size: 13px; font-weight: bold; letter-spacing: 2px; cursor: pointer; border: 1px solid transparent; transition: transform 0.1s, filter 0.15s; }
+        .menu-btn:active { transform: scale(0.96); }
+        .menu-btn.primary { background: #10b981; color: #01040a; box-shadow: 0 4px 14px rgba(16,185,129,0.35); }
+        .menu-btn.primary:hover { filter: brightness(1.1); }
+        .menu-btn.ghost { background: rgba(52, 211, 153, 0.08); color: #34d399; border-color: rgba(52,211,153,0.45); }
+        .menu-btn.ghost:hover { background: rgba(52, 211, 153, 0.18); }
+        .menu-btn.danger { background: rgba(239, 68, 68, 0.12); color: #f87171; border-color: rgba(239,68,68,0.5); }
+        .menu-btn.danger:hover { background: rgba(239, 68, 68, 0.24); }
+
         .arcade-btn { margin-top: 20px; padding: 14px 30px; background: #10b981; color: #01040a; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4); font-family: monospace; font-size: 14px; letter-spacing: 1px; transition: transform 0.1s; }
         .arcade-btn:active { transform: scale(0.95); }
+        #overlayExitBtn { margin-top: 12px; background: none; border: 1px solid rgba(148,163,184,0.4); color: #94a3b8; padding: 10px 24px; border-radius: 8px; font-family: monospace; font-size: 12px; letter-spacing: 2px; cursor: pointer; }
+        #overlayExitBtn:hover { color: #cbd5e1; border-color: rgba(203,213,225,0.6); }
     </style>
 </head>
 """
-# Part B: Loading screen, title/tap-to-play screen, and the game-over overlay
+# Part B: Loading screen, title/tap-to-play screen, pause menu, and the game-over overlay
 game_html += r"""
 <body>
     <div id="gameContainer">
         <div id="hud" style="display:none;">
-            <div id="scoreLabel">SCORE: 00000</div>
+            <div id="hudLeft">
+                <button id="pauseBtn" aria-label="Pause game" title="Pause (Esc)">
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1"></rect><rect x="14" y="4" width="4" height="16" rx="1"></rect></svg>
+                </button>
+                <div id="scoreLabel">SCORE: 00000</div>
+            </div>
             <div id="sizeLabel">RANK: MINNOW (15)</div>
         </div>
 
@@ -71,10 +101,21 @@ game_html += r"""
             <div id="tapPrompt">TAP OR CLICK TO PLAY</div>
         </div>
 
+        <div id="pauseOverlay">
+            <div id="pauseCard">
+                <h2 id="pauseTitle">PAUSED</h2>
+                <p id="pauseHint">PRESS ESC OR P TO RESUME</p>
+                <button class="menu-btn primary" id="resumeBtn">▶ RESUME</button>
+                <button class="menu-btn ghost" id="restartBtn">🔄 RESTART</button>
+                <button class="menu-btn danger" id="exitBtn">✕ EXIT GAME</button>
+            </div>
+        </div>
+
         <div id="screenOverlay">
             <h2 id="overlayTitle" style="color: #10b981; letter-spacing: 3px; font-size: 26px; margin: 0;">GAME OVER</h2>
             <p id="overlaySub" style="color: #64748b; font-size: 12px; max-width: 320px; line-height: 1.6; margin-top: 10px;"></p>
-            <button class="arcade-btn" id="actionBtn" onclick="initiateArcadeGame()">REDEPLOY DESCENT 🔄</button>
+            <button class="arcade-btn" id="actionBtn">REDEPLOY DESCENT 🔄</button>
+            <button id="overlayExitBtn">EXIT TO TITLE</button>
         </div>
 
         <canvas id="aquariumCanvas"></canvas>
@@ -87,8 +128,11 @@ game_html += r"""
     const screenOverlay = document.getElementById("screenOverlay"); const overlayTitle = document.getElementById("overlayTitle"); const overlaySub = document.getElementById("overlaySub"); const actionBtn = document.getElementById("actionBtn");
     const loadingScreen = document.getElementById("loadingScreen"); const loadingBarFill = document.getElementById("loadingBarFill"); const loadingPercent = document.getElementById("loadingPercent");
     const titleScreen = document.getElementById("titleScreen");
+    const pauseBtn = document.getElementById("pauseBtn"); const pauseOverlay = document.getElementById("pauseOverlay");
+    const resumeBtn = document.getElementById("resumeBtn"); const restartBtn = document.getElementById("restartBtn"); const exitBtn = document.getElementById("exitBtn");
+    const overlayExitBtn = document.getElementById("overlayExitBtn");
 
-    let score = 0, gameActive = false, timeTick = 0, lastTimestamp = null;
+    let score = 0, gameActive = false, gamePaused = false, timeTick = 0, lastTimestamp = null;
     let player = { x: 190, y: 240, vx: 0, vy: 0, radius: 15, targetX: 190, targetY: 240, facingLeft: false, tailWag: 0, tiltAngle: 0 };
     let marineThreats = []; let environmentBubbles = []; let particles = []; let kelpFronds = [];
     let animationFrameId = null, spawnIntervalId = null, audioCtx = null;
@@ -135,15 +179,15 @@ game_html += r"""
     }
 
     function updateInputCoordinates(clientX, clientY) {
-        if (!gameActive) return; const rect = container.getBoundingClientRect();
+        if (!gameActive || gamePaused) return; const rect = container.getBoundingClientRect();
         player.targetX = Math.max(15, Math.min(clientX - rect.left, rect.width - 15));
         player.targetY = Math.max(15, Math.min(clientY - rect.top, rect.height - 15));
     }
     container.addEventListener("mousemove", (e) => updateInputCoordinates(e.clientX, e.clientY));
-    container.addEventListener("touchstart", (e) => { if (gameActive && e.touches && e.touches.length > 0) { updateInputCoordinates(e.touches[0].clientX, e.touches[0].clientY); } }, { passive: true });
-    container.addEventListener("touchmove", (e) => { if (gameActive) { e.preventDefault(); if (e.touches && e.touches.length > 0) updateInputCoordinates(e.touches[0].clientX, e.touches[0].clientY); } }, { passive: false });
+    container.addEventListener("touchstart", (e) => { if (gameActive && !gamePaused && e.touches && e.touches.length > 0) { updateInputCoordinates(e.touches[0].clientX, e.touches[0].clientY); } }, { passive: true });
+    container.addEventListener("touchmove", (e) => { if (gameActive && !gamePaused) { e.preventDefault(); if (e.touches && e.touches.length > 0) updateInputCoordinates(e.touches[0].clientX, e.touches[0].clientY); } }, { passive: false });
 """
-# Part C: Loading sequence + tap-to-play title screen (replaces the old Streamlit page header entirely)
+# Part C: Loading sequence + tap-to-play title screen + pause / restart / exit menu wiring
 game_html += r"""
     let loadProgress = 0;
     function runLoadingSequence() {
@@ -163,15 +207,74 @@ game_html += r"""
     titleScreen.addEventListener("click", beginFromTitle);
     titleScreen.addEventListener("touchstart", (e) => { e.preventDefault(); beginFromTitle(); }, { passive: false });
     runLoadingSequence();
+
+    /* ---------- Pause / Restart / Exit ---------- */
+    function pauseGame() {
+        if (!gameActive || gamePaused) return;
+        gamePaused = true;
+        if (animationFrameId) { cancelAnimationFrame(animationFrameId); animationFrameId = null; }
+        if (spawnIntervalId) { clearInterval(spawnIntervalId); spawnIntervalId = null; }
+        pauseOverlay.style.display = "flex";
+    }
+    function resumeGame() {
+        if (!gameActive || !gamePaused) return;
+        gamePaused = false;
+        pauseOverlay.style.display = "none";
+        // Snap the follow target to the fish so it doesn't lurch on resume
+        player.targetX = player.x; player.targetY = player.y;
+        lastTimestamp = null;
+        if (!spawnIntervalId) spawnIntervalId = setInterval(generateMarineLife, 650);
+        if (!animationFrameId) animationFrameId = requestAnimationFrame(runGameLoop);
+    }
+    function togglePause() { gamePaused ? resumeGame() : pauseGame(); }
+
+    function exitToTitle() {
+        gameActive = false; gamePaused = false;
+        if (animationFrameId) { cancelAnimationFrame(animationFrameId); animationFrameId = null; }
+        if (spawnIntervalId) { clearInterval(spawnIntervalId); spawnIntervalId = null; }
+        pauseOverlay.style.display = "none";
+        screenOverlay.style.display = "none";
+        hud.style.display = "none";
+        marineThreats = []; particles = []; environmentBubbles = [];
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        titleScreen.style.display = "flex";
+    }
+    function restartGame() { pauseOverlay.style.display = "none"; gamePaused = false; initiateArcadeGame(); }
+
+    pauseBtn.addEventListener("click", (e) => { e.stopPropagation(); togglePause(); });
+    resumeBtn.addEventListener("click", (e) => { e.stopPropagation(); resumeGame(); });
+    restartBtn.addEventListener("click", (e) => { e.stopPropagation(); restartGame(); });
+    exitBtn.addEventListener("click", (e) => { e.stopPropagation(); exitToTitle(); });
+    actionBtn.addEventListener("click", (e) => { e.stopPropagation(); initiateArcadeGame(); });
+    overlayExitBtn.addEventListener("click", (e) => { e.stopPropagation(); exitToTitle(); });
+
+    window.addEventListener("keydown", (e) => {
+        const k = e.key.toLowerCase();
+        if (k === "escape" || k === "p") { if (gameActive) { e.preventDefault(); togglePause(); } }
+    });
+    // Auto-pause if the player tabs away mid-dive
+    document.addEventListener("visibilitychange", () => { if (document.hidden) pauseGame(); });
 """
-# Part D: Painterly reef-fish rendering — banded body, eye-mask stripe, flowing fins, and a soft red/green edibility aura
+# Part D: True fish-silhouette rendering — tapered body with snout + peduncle, scales, gills, pectoral fin
 game_html += r"""
     function drawAura(r, colorRgb, strong) {
-        const outer = strong ? r * 1.32 : r * 1.15;
+        const outer = strong ? r * 1.5 : r * 1.3;
         const peakAlpha = strong ? 0.4 : 0.22;
-        let g = ctx.createRadialGradient(0, 0, r * 0.65, 0, 0, outer);
+        let g = ctx.createRadialGradient(0, 0, r * 0.7, 0, 0, outer);
         g.addColorStop(0, `rgba(${colorRgb}, ${peakAlpha})`); g.addColorStop(1, `rgba(${colorRgb}, 0)`);
-        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, outer, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(0, 0, outer * 1.12, outer * 0.82, 0, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // Real fish outline: pointed snout at +x, full mid-body, tapering down to a narrow tail peduncle at -x.
+    function traceFishBody(r) {
+        ctx.beginPath();
+        ctx.moveTo(r * 1.10, r * 0.06);                                                     // snout tip
+        ctx.bezierCurveTo(r * 0.86, -r * 0.44, r * 0.42, -r * 0.92, -r * 0.06, -r * 0.90);  // forehead -> back
+        ctx.bezierCurveTo(-r * 0.44, -r * 0.88, -r * 0.72, -r * 0.58, -r * 0.94, -r * 0.20);// back -> peduncle top
+        ctx.quadraticCurveTo(-r * 1.00, 0, -r * 0.94, r * 0.20);                            // narrow peduncle
+        ctx.bezierCurveTo(-r * 0.70, r * 0.60, -r * 0.38, r * 0.92, r * 0.06, r * 0.94);    // belly rear
+        ctx.bezierCurveTo(r * 0.52, r * 0.96, r * 0.90, r * 0.52, r * 1.10, r * 0.06);      // belly -> chin -> snout
+        ctx.closePath();
     }
 
     function drawRealisticFish(x, y, r, isLeft, species, fishType, pulseTick, speedMag, tiltAngle, depthScale, auraColorRgb) {
@@ -182,68 +285,144 @@ game_html += r"""
 
         const wagSpeed = 0.1 + Math.min(0.28, speedMag * 0.2);
         const wag = Math.sin(pulseTick * wagSpeed) * (r * (0.2 + Math.min(0.15, speedMag * 0.1)));
-        const tailWag = Math.sin(pulseTick * wagSpeed + 0.6) * (r * 0.32);
+        const tailWag = Math.sin(pulseTick * wagSpeed + 0.6) * (r * 0.34);
+        // body depth by species build: 1 = deep/disc, 2 = slender torpedo, 3 = balanced
+        const bodyYScale = fishType === 1 ? 1.02 : (fishType === 2 ? 0.60 : 0.80);
 
         // contact shadow (depth cue)
-        ctx.save(); ctx.globalAlpha = 0.16; ctx.fillStyle = "#000814"; ctx.beginPath(); ctx.ellipse(r * 0.1, r * 1.3, r * 0.9, r * 0.26, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+        ctx.save(); ctx.globalAlpha = 0.16; ctx.fillStyle = "#000814"; ctx.beginPath(); ctx.ellipse(r * 0.05, r * (0.95 * bodyYScale + 0.35), r * 0.95, r * 0.22, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();
 
-        // flowing caudal (tail) fin — body color fading into the bright fin-tip color, like the reference art
-        let tailGrd = ctx.createLinearGradient(-r * 0.8, 0, -r * 2.3, 0);
-        tailGrd.addColorStop(0, species.bands[2]); tailGrd.addColorStop(1, species.finColor);
-        ctx.fillStyle = tailGrd; ctx.globalAlpha = 0.92;
+        // ---- caudal (tail) fin: forked, swept, translucent membrane with ray lines ----
+        const tx = -r * 0.92; // peduncle attach point
+        let tailGrd = ctx.createLinearGradient(tx, 0, -r * 2.2, 0);
+        tailGrd.addColorStop(0, species.bands[2]); tailGrd.addColorStop(0.55, species.bands[1]); tailGrd.addColorStop(1, species.finColor);
+        ctx.fillStyle = tailGrd; ctx.globalAlpha = 0.9;
         ctx.beginPath();
-        if (fishType === 2) {
-            ctx.moveTo(-r * 0.8, 0); ctx.quadraticCurveTo(-r * 1.6, -r * 0.9 + tailWag, -r * 2.3, -r * 1.0 + tailWag); ctx.lineTo(-r * 1.6, tailWag); ctx.lineTo(-r * 2.3, r * 1.0 + tailWag); ctx.quadraticCurveTo(-r * 1.6, r * 0.9 + tailWag, -r * 0.8, 0);
-        } else {
-            ctx.moveTo(-r * 0.7, 0); ctx.lineTo(-r * 2.1, -r * 0.75 + tailWag); ctx.lineTo(-r * 1.5, tailWag); ctx.lineTo(-r * 2.1, r * 0.75 + tailWag);
+        if (fishType === 2) { // deep fork (fast swimmer)
+            ctx.moveTo(tx, -r * 0.12 * bodyYScale);
+            ctx.quadraticCurveTo(-r * 1.5, -r * 0.95 + tailWag, -r * 2.15, -r * 1.05 + tailWag);
+            ctx.quadraticCurveTo(-r * 1.42, -r * 0.16 + tailWag * 0.7, -r * 1.30, tailWag * 0.6);
+            ctx.quadraticCurveTo(-r * 1.42, r * 0.16 + tailWag * 0.7, -r * 2.15, r * 1.05 + tailWag);
+            ctx.quadraticCurveTo(-r * 1.5, r * 0.95 + tailWag, tx, r * 0.12 * bodyYScale);
+        } else { // fan / rounded caudal
+            ctx.moveTo(tx, -r * 0.14 * bodyYScale);
+            ctx.quadraticCurveTo(-r * 1.45, -r * 0.78 + tailWag, -r * 1.95, -r * 0.72 + tailWag);
+            ctx.quadraticCurveTo(-r * 1.55, tailWag * 0.9, -r * 1.95, r * 0.72 + tailWag);
+            ctx.quadraticCurveTo(-r * 1.45, r * 0.78 + tailWag, tx, r * 0.14 * bodyYScale);
         }
+        ctx.closePath(); ctx.fill();
+        // fin rays
+        ctx.strokeStyle = "rgba(255,255,255,0.28)"; ctx.lineWidth = Math.max(0.6, r * 0.035); ctx.globalAlpha = 0.55;
+        for (let i = -2; i <= 2; i++) {
+            ctx.beginPath(); ctx.moveTo(tx, 0);
+            ctx.quadraticCurveTo(-r * 1.4, i * r * 0.3 + tailWag * 0.8, -r * 1.9, i * r * 0.38 + tailWag);
+            ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+
+        // ---- dorsal fin: spiny ridge along the back with a soft trailing edge ----
+        let dorsalGrd = ctx.createLinearGradient(0, -r * bodyYScale * 0.85, 0, -r * bodyYScale * 1.75);
+        dorsalGrd.addColorStop(0, species.bands[1]); dorsalGrd.addColorStop(1, species.finColor);
+        ctx.fillStyle = dorsalGrd; ctx.globalAlpha = 0.94;
+        ctx.beginPath();
+        ctx.moveTo(-r * 0.72, -r * 0.55 * bodyYScale);
+        ctx.quadraticCurveTo(-r * 0.30, -r * (1.45 * bodyYScale) + wag * 0.3, r * 0.16, -r * (1.22 * bodyYScale));
+        ctx.quadraticCurveTo(r * 0.34, -r * (0.98 * bodyYScale), r * 0.42, -r * (0.72 * bodyYScale));
+        ctx.quadraticCurveTo(-r * 0.10, -r * (0.86 * bodyYScale), -r * 0.72, -r * 0.55 * bodyYScale);
+        ctx.closePath(); ctx.fill();
+        ctx.globalAlpha = 1;
+
+        // ---- anal fin (underside, rear) ----
+        ctx.fillStyle = species.finColor; ctx.globalAlpha = 0.8;
+        ctx.beginPath();
+        ctx.moveTo(-r * 0.62, r * 0.52 * bodyYScale);
+        ctx.quadraticCurveTo(-r * 0.42, r * (1.18 * bodyYScale) + wag * 0.35, -r * 0.02, r * (1.02 * bodyYScale));
+        ctx.quadraticCurveTo(-r * 0.28, r * (0.80 * bodyYScale), -r * 0.62, r * 0.52 * bodyYScale);
         ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
 
-        // flowing dorsal fin — long, trailing, bright tip
-        let finGrd = ctx.createLinearGradient(0, -r * 0.8, 0, -r * 1.6);
-        finGrd.addColorStop(0, species.bands[1]); finGrd.addColorStop(1, species.finColor);
-        ctx.fillStyle = finGrd;
-        ctx.beginPath(); ctx.moveTo(-r * 0.25, -r * 0.85); ctx.quadraticCurveTo(r * 0.05, -r * 1.7 + wag * 0.35, r * 0.55, -r * 0.75); ctx.quadraticCurveTo(r * 0.1, -r * 0.7, -r * 0.25, -r * 0.85); ctx.fill();
-
-        // anal / pectoral fin, same bright-tip treatment
-        ctx.beginPath(); ctx.moveTo(-r * 0.1, r * 0.3); ctx.quadraticCurveTo(r * 0.1, r * 1.0 + wag * 0.4, r * 0.4, r * 0.8 + wag * 0.4); ctx.quadraticCurveTo(r * 0.15, r * 0.5, -r * 0.1, r * 0.3); ctx.fill();
-
-        // body: clip to the silhouette, paint diagonal color bands, then a soft multiply shading pass for roundness
-        let bodyYScale = fishType === 1 ? 1.0 : (fishType === 2 ? 0.65 : 0.8);
+        // ---- body: clip to the fish silhouette, then paint bands, scales and volume shading ----
         ctx.save();
         ctx.scale(1, bodyYScale);
         ctx.save();
-        ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.clip();
-        ctx.fillStyle = species.bands[0]; ctx.fillRect(-r * 1.2, -r * 1.2, r * 2.4, r * 2.4);
+        traceFishBody(r); ctx.clip();
+
+        ctx.fillStyle = species.bands[0]; ctx.fillRect(-r * 1.3, -r * 1.3, r * 2.7, r * 2.6);
         ctx.fillStyle = species.bands[1];
-        ctx.beginPath(); ctx.moveTo(-r * 0.15, -r * 1.2); ctx.lineTo(r * 0.25, -r * 1.2); ctx.lineTo(-r * 0.05, r * 1.2); ctx.lineTo(-r * 0.45, r * 1.2); ctx.closePath(); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(-r * 0.18, -r * 1.3); ctx.lineTo(r * 0.22, -r * 1.3); ctx.lineTo(-r * 0.08, r * 1.3); ctx.lineTo(-r * 0.48, r * 1.3); ctx.closePath(); ctx.fill();
         ctx.fillStyle = species.bands[2];
-        ctx.beginPath(); ctx.moveTo(r * 0.32, -r * 1.2); ctx.lineTo(r * 0.68, -r * 1.2); ctx.lineTo(r * 0.42, r * 1.2); ctx.lineTo(r * 0.06, r * 1.2); ctx.closePath(); ctx.fill();
-        let shadeGrd = ctx.createRadialGradient(r * 0.2, -r * 0.35, r * 0.1, 0, 0, r * 1.15);
-        shadeGrd.addColorStop(0, "rgba(255,255,255,0.85)"); shadeGrd.addColorStop(0.5, "rgba(255,255,255,0.15)"); shadeGrd.addColorStop(1, "rgba(10,10,20,0.55)");
-        ctx.globalCompositeOperation = "multiply"; ctx.fillStyle = shadeGrd; ctx.fillRect(-r * 1.2, -r * 1.2, r * 2.4, r * 2.4); ctx.globalCompositeOperation = "source-over";
-        ctx.restore(); // drop clip only
+        ctx.beginPath(); ctx.moveTo(r * 0.30, -r * 1.3); ctx.lineTo(r * 0.64, -r * 1.3); ctx.lineTo(r * 0.38, r * 1.3); ctx.lineTo(r * 0.04, r * 1.3); ctx.closePath(); ctx.fill();
+        // tail-end darkening toward the peduncle
+        let pedGrd = ctx.createLinearGradient(-r * 0.45, 0, -r * 1.0, 0);
+        pedGrd.addColorStop(0, "rgba(0,0,0,0)"); pedGrd.addColorStop(1, "rgba(2,6,14,0.45)");
+        ctx.fillStyle = pedGrd; ctx.fillRect(-r * 1.3, -r * 1.3, r * 1.3, r * 2.6);
 
-        // underside ambient occlusion + top rim light for volume
-        ctx.save(); ctx.globalAlpha = 0.22; ctx.fillStyle = "#000308"; ctx.beginPath(); ctx.ellipse(0, r * 0.55, r * 0.75, r * 0.4, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();
-        ctx.strokeStyle = "rgba(255,255,255,0.5)"; ctx.lineWidth = Math.max(1, r * 0.07); ctx.beginPath(); ctx.arc(0, 0, r * 0.97, Math.PI * 1.1, Math.PI * 1.75); ctx.stroke();
+        // scale rows — small overlapping arcs, denser near the middle of the flank
+        ctx.strokeStyle = "rgba(255,255,255,0.16)"; ctx.lineWidth = Math.max(0.5, r * 0.028);
+        const scaleStep = Math.max(3.2, r * 0.24);
+        for (let sy = -r * 0.85; sy < r * 0.85; sy += scaleStep) {
+            for (let sx = -r * 0.85; sx < r * 0.95; sx += scaleStep) {
+                const off = (Math.round((sy + r) / scaleStep) % 2) * scaleStep * 0.5;
+                ctx.beginPath(); ctx.arc(sx + off, sy, scaleStep * 0.52, Math.PI * 0.15, Math.PI * 0.85); ctx.stroke();
+            }
+        }
+        // lateral line
+        ctx.strokeStyle = "rgba(0,0,0,0.20)"; ctx.lineWidth = Math.max(0.6, r * 0.04);
+        ctx.beginPath(); ctx.moveTo(r * 0.72, -r * 0.06); ctx.quadraticCurveTo(0, r * 0.10, -r * 0.88, r * 0.02); ctx.stroke();
 
-        // eye-mask stripe — the dark diagonal band real reef fish (angelfish/butterflyfish) wear through the eye
-        ctx.save(); ctx.globalAlpha = 0.88; ctx.fillStyle = species.maskColor;
-        ctx.beginPath(); ctx.moveTo(r * 0.28, -r * 1.2); ctx.lineTo(r * 0.5, -r * 1.2); ctx.lineTo(r * 0.14, r * 1.2); ctx.lineTo(-r * 0.08, r * 1.2); ctx.closePath(); ctx.fill(); ctx.restore();
+        // eye-mask stripe — the dark diagonal band real reef fish wear through the eye
+        ctx.save(); ctx.globalAlpha = 0.85; ctx.fillStyle = species.maskColor;
+        ctx.beginPath(); ctx.moveTo(r * 0.62, -r * 1.3); ctx.lineTo(r * 0.82, -r * 1.3); ctx.lineTo(r * 0.50, r * 1.3); ctx.lineTo(r * 0.30, r * 1.3); ctx.closePath(); ctx.fill(); ctx.restore();
 
-        // gloss highlight
-        ctx.save(); ctx.globalAlpha = 0.6; ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.ellipse(r * 0.12, -r * 0.4, r * 0.3, r * 0.15, -0.4, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+        // gill plate (operculum) crease
+        ctx.strokeStyle = "rgba(2,10,20,0.35)"; ctx.lineWidth = Math.max(0.8, r * 0.055);
+        ctx.beginPath(); ctx.moveTo(r * 0.30, -r * 0.66); ctx.quadraticCurveTo(r * 0.10, 0, r * 0.34, r * 0.62); ctx.stroke();
+
+        // volume shading: rim light on the back, ambient occlusion on the belly
+        let shadeGrd = ctx.createRadialGradient(r * 0.25, -r * 0.42, r * 0.08, 0, 0, r * 1.25);
+        shadeGrd.addColorStop(0, "rgba(255,255,255,0.85)"); shadeGrd.addColorStop(0.45, "rgba(255,255,255,0.16)"); shadeGrd.addColorStop(1, "rgba(8,12,24,0.6)");
+        ctx.globalCompositeOperation = "multiply"; ctx.fillStyle = shadeGrd; ctx.fillRect(-r * 1.3, -r * 1.3, r * 2.7, r * 2.6);
+        ctx.globalCompositeOperation = "source-over";
+        // pale countershaded belly (real fish are light underneath)
+        let bellyGrd = ctx.createLinearGradient(0, r * 0.2, 0, r * 1.0);
+        bellyGrd.addColorStop(0, "rgba(255,255,255,0)"); bellyGrd.addColorStop(1, "rgba(255,255,255,0.34)");
+        ctx.fillStyle = bellyGrd; ctx.fillRect(-r * 1.3, 0, r * 2.7, r * 1.3);
+
+        ctx.restore(); // drop clip
+
+        // silhouette edge: dark outline + top rim highlight so the shape reads clearly underwater
+        traceFishBody(r);
+        ctx.strokeStyle = "rgba(1,6,14,0.55)"; ctx.lineWidth = Math.max(1, r * 0.06); ctx.stroke();
+        ctx.save(); ctx.clip();
+        ctx.strokeStyle = "rgba(255,255,255,0.45)"; ctx.lineWidth = Math.max(1, r * 0.10);
+        ctx.beginPath(); ctx.moveTo(r * 0.92, -r * 0.30); ctx.bezierCurveTo(r * 0.45, -r * 0.92, -r * 0.10, -r * 0.95, -r * 0.60, -r * 0.62); ctx.stroke();
+        ctx.restore();
+
+        // pectoral fin — sits on the flank, above the body edge, semi-transparent
+        ctx.save();
+        ctx.globalAlpha = 0.62; ctx.fillStyle = species.finColor;
+        const pecWag = Math.sin(pulseTick * (wagSpeed + 0.06)) * (r * 0.16);
+        ctx.beginPath();
+        ctx.moveTo(r * 0.24, r * 0.06);
+        ctx.quadraticCurveTo(-r * 0.10, r * 0.52 + pecWag, -r * 0.34, r * 0.30 + pecWag);
+        ctx.quadraticCurveTo(-r * 0.06, r * 0.16, r * 0.24, r * 0.06);
+        ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = Math.max(0.5, r * 0.03); ctx.stroke();
+        ctx.restore();
+
+        // mouth line at the snout
+        ctx.strokeStyle = "rgba(2,8,16,0.6)"; ctx.lineWidth = Math.max(0.8, r * 0.05);
+        ctx.beginPath(); ctx.moveTo(r * 1.06, r * 0.10); ctx.quadraticCurveTo(r * 0.90, r * 0.20, r * 0.78, r * 0.16); ctx.stroke();
 
         ctx.restore(); // undo bodyYScale
 
         // eye — drawn after the y-scale is undone so it stays perfectly round
-        let eyeX = r * 0.52; let eyeY = -r * 0.25 * bodyYScale; let eyeRadius = Math.max(3, r * 0.2);
+        let eyeX = r * 0.66; let eyeY = -r * 0.28 * bodyYScale; let eyeRadius = Math.max(2.5, r * 0.17);
+        ctx.fillStyle = "rgba(255,255,255,0.7)"; ctx.beginPath(); ctx.arc(eyeX, eyeY, eyeRadius * 1.18, 0, Math.PI * 2); ctx.fill();
         let eyeGrd = ctx.createRadialGradient(eyeX - eyeRadius * 0.2, eyeY - eyeRadius * 0.2, 1, eyeX, eyeY, eyeRadius);
-        eyeGrd.addColorStop(0, "#ffffff"); eyeGrd.addColorStop(1, "#cbd5e1");
+        eyeGrd.addColorStop(0, "#fdfdff"); eyeGrd.addColorStop(1, "#b9c6d4");
         ctx.fillStyle = eyeGrd; ctx.beginPath(); ctx.arc(eyeX, eyeY, eyeRadius, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = "#020617"; ctx.beginPath(); ctx.arc(eyeX + eyeRadius * 0.15, eyeY, eyeRadius * 0.5, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(eyeX + eyeRadius * 0.32, eyeY - eyeRadius * 0.2, eyeRadius * 0.15, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#020617"; ctx.beginPath(); ctx.arc(eyeX + eyeRadius * 0.12, eyeY, eyeRadius * 0.52, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(eyeX + eyeRadius * 0.34, eyeY - eyeRadius * 0.24, eyeRadius * 0.17, 0, Math.PI * 2); ctx.fill();
 
         ctx.restore();
     }
@@ -255,10 +434,10 @@ game_html += r"""
 # Part E: Faster, frame-rate-independent physics; capped/targeted spawning (max 8 fish, ~3 edible + ~3 not); game loop
 game_html += r"""
     function initiateArcadeGame() {
-        setupAudio(); score = 0; gameActive = true; player.radius = 15;
+        setupAudio(); score = 0; gameActive = true; gamePaused = false; player.radius = 15;
         player.x = canvas.width / 2; player.y = canvas.height / 2; player.targetX = player.x; player.targetY = player.y; player.vx = 0; player.vy = 0;
         marineThreats = []; environmentBubbles = []; particles = []; screenShake = 0; lastTimestamp = null;
-        screenOverlay.style.display = "none"; hud.style.display = "flex";
+        screenOverlay.style.display = "none"; pauseOverlay.style.display = "none"; titleScreen.style.display = "none"; hud.style.display = "flex";
         scoreLabel.innerText = "SCORE: 00000"; sizeLabel.innerText = "RANK: MINNOW (15)";
         if (spawnIntervalId) clearInterval(spawnIntervalId); spawnIntervalId = setInterval(generateMarineLife, 650);
         if (animationFrameId) cancelAnimationFrame(animationFrameId); animationFrameId = requestAnimationFrame(runGameLoop);
@@ -267,7 +446,7 @@ game_html += r"""
     // Keeps roughly 3 edible + 3 not-yet-edible fish on screen at once, hard-capped at 8 total —
     // spawns one at a time so the screen never gets flooded in a single burst.
     function generateMarineLife() {
-        if (!gameActive) return;
+        if (!gameActive || gamePaused) return;
         if (marineThreats.length >= MAX_FISH_ON_SCREEN) return;
         let edibleCount = 0, inedibleCount = 0;
         marineThreats.forEach(t => { if (t.radius < player.radius) edibleCount++; else inedibleCount++; });
@@ -287,13 +466,14 @@ game_html += r"""
     function getRankName(r) { if (r < 25) return "MINNOW"; if (r < 40) return "BASS"; if (r < 55) return "TUNA"; return "APEX SHARK"; }
 
     function terminateGameEngine(victory) {
-        gameActive = false; clearInterval(spawnIntervalId); cancelAnimationFrame(animationFrameId); screenOverlay.style.display = "flex";
+        gameActive = false; gamePaused = false; clearInterval(spawnIntervalId); spawnIntervalId = null; cancelAnimationFrame(animationFrameId); animationFrameId = null;
+        pauseOverlay.style.display = "none"; screenOverlay.style.display = "flex";
         if (victory) { sound("level"); overlayTitle.innerText = "👑 APEX OCEAN GOD 👑"; overlayTitle.style.color = "#eab308"; overlaySub.innerText = `Evolution completed safely! Final Score: ${score}`; actionBtn.innerText = "RESTART EVOLUTION 🔄"; }
         else { sound("boom"); screenShake = 14; overlayTitle.innerText = "🐋 CONSUMED 🐋"; overlayTitle.style.color = "#ef4444"; overlaySub.innerText = `You became organic mass. Final Score: ${score}`; actionBtn.innerText = "REDEPLOY DESCENT 🔄"; }
     }
 
     function runGameLoop(timestamp) {
-        if (!gameActive) return;
+        if (!gameActive || gamePaused) return;
         if (lastTimestamp === null) lastTimestamp = timestamp;
         let dt = (timestamp - lastTimestamp) / (1000 / 60);
         dt = Math.max(0, Math.min(dt, 3));
